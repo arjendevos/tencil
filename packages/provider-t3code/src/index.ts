@@ -1,6 +1,7 @@
 export type { ModelSelection, RuntimeMode } from "./adapter.ts";
 export {
   CredentialStore,
+  createLocalPairingCode,
   DEFAULT_T3_URL,
   exchangePairingCredential,
   parsePairingInput,

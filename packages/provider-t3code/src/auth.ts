@@ -65,8 +65,14 @@ export async function exchangePairingCredential(
     body,
   });
   if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+      error_description?: string;
+    } | null;
+    const reason = body?.error_description ?? body?.error;
     throw new Error(
-      `T3 Code rejected the pairing code (${response.status}). Pairing codes are single-use; create a fresh one.`,
+      `T3 Code rejected the pairing code (${response.status}${reason ? `: ${reason}` : ""}). ` +
+        "Codes work once and expire after about 5 minutes; use the `Token:` value, not the link id.",
     );
   }
   const result = (await response.json()) as {
@@ -83,6 +89,30 @@ export async function exchangePairingCredential(
     scope: result.scope,
     expiresAt: new Date(Date.now() + result.expires_in * 1000).toISOString(),
   };
+}
+
+/**
+ * Mint a pairing code on a local T3 Code by running the `t3` CLI that matches
+ * the server's own version (mismatched CLIs may migrate the database).
+ * Returns undefined when the server isn't local or the CLI fails.
+ */
+export async function createLocalPairingCode(
+  baseUrl: string,
+  baseDir = process.env.T3CODE_HOME ?? join(homedir(), ".t3"),
+): Promise<string | undefined> {
+  const { hostname } = new URL(baseUrl);
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) return undefined;
+  const response = await fetch(new URL("/.well-known/t3/environment", baseUrl)).catch(() => null);
+  if (!response?.ok) return undefined;
+  const { serverVersion } = (await response.json()) as { serverVersion?: string };
+  if (!serverVersion) return undefined;
+  const { spawnSync } = await import("node:child_process");
+  const result = spawnSync(
+    "npx",
+    ["-y", `t3@${serverVersion}`, "auth", "pairing", "create", "--base-dir", baseDir],
+    { encoding: "utf8", timeout: 120_000 },
+  );
+  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.match(/^Token:\s*(\S+)/m)?.[1];
 }
 
 export async function requestWebSocketTicket(baseUrl: string, token: string): Promise<string> {
