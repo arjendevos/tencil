@@ -38,6 +38,7 @@ export const styles = /* css */ `
   font: 13px/1.5 Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   letter-spacing: 0.02rem;
   color: var(--n-950);
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
 }
 @media (prefers-color-scheme: dark) {
@@ -62,7 +63,16 @@ export const styles = /* css */ `
     --warn: #f5b84a;
     --error: #ff6369;
     --shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 16px 40px -8px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
   }
+}
+
+/* Thin, theme-aware scrollbars everywhere inside the overlay. */
+* { scrollbar-width: thin; scrollbar-color: var(--n-200) transparent; }
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--n-200); border-radius: 999px; }
 }
 .root.picking { cursor: crosshair; }
 ::selection { background: var(--accent); color: white; }
@@ -172,6 +182,30 @@ kbd {
 .thread-dot-waiting { background: var(--warn); }
 .thread-dot-error { background: var(--error); }
 .thread-dot-idle { background: var(--done); }
+
+/* Provider thread rows, after T3 Code's sidebar. */
+.inbox-item.provider-item {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; padding: 9px 10px;
+}
+.provider-item-project { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--n-500); font-size: 12px; }
+.provider-item-project-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.provider-item-time { flex: none; font-variant-numeric: tabular-nums; }
+.provider-item-state { flex: none; font-weight: 500; }
+.state-working { color: var(--live); }
+.state-waiting { color: var(--warn); }
+.state-monitoring { color: var(--accent); }
+.provider-item-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.provider-item-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--n-500); font-size: 12px; }
+.provider-item-branch { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.provider-item-pr { flex: none; color: var(--done); font-variant-numeric: tabular-nums; }
+.provider-item-pins { flex: none; color: var(--accent); }
+.provider-item-meta .agent-icon { margin-left: auto; }
+.project-icon { width: 14px; height: 14px; border-radius: 4px; flex: none; object-fit: contain; }
+.project-icon-emoji { font-size: 12px; line-height: 14px; text-align: center; }
+.project-icon-letter { display: grid; place-items: center; background: var(--n-200); color: var(--n-700); font-size: 9px; font-weight: 600; text-transform: uppercase; }
+.agent-icon { flex: none; }
+.agent-mono { fill: var(--n-950); }
+.agent-claude { fill: #d97757; }
 .hint { margin: 0; padding: 0 2px; color: var(--warn); font-size: 12px; }
 
 .chip {
@@ -244,7 +278,6 @@ kbd {
 .messages {
   overflow-y: auto; padding: 16px 2px; min-height: 40px;
   display: flex; flex-direction: column; gap: 1.25rem;
-  scrollbar-width: thin;
 }
 /* Fade the top edge once content scrolls under the header. */
 .messages[data-scrolled] { mask-image: linear-gradient(to bottom, transparent 0, #000 2.5rem); }

@@ -6,6 +6,7 @@ import type {
   CreateThreadInput,
   Provider,
   ProviderInfo,
+  ProviderProject,
   ProviderThreadSummary,
   SendMessageInput,
   ThreadSink,
@@ -43,10 +44,13 @@ interface WireProject {
   title: string;
   workspaceRoot: string;
   defaultModelSelection?: ModelSelection | null;
+  repositoryIdentity?: { owner?: string; name?: string; displayName?: string } | null;
+  projectIcon?: { kind: "emoji"; emoji: string } | { kind: string } | null;
 }
 
 interface WireServerProvider {
   instanceId: string;
+  driver?: string;
   enabled: boolean;
   installed: boolean;
   status: string;
@@ -71,10 +75,18 @@ interface WireShellThread {
   hasPendingApprovals?: boolean;
   hasPendingUserInput?: boolean;
   status?: string;
+  branch?: string | null;
+  linkedPullRequest?: { number: number; url: string } | null;
+  branchPullRequest?: { number: number; url: string } | null;
+  backgroundLiveness?: "working" | "monitoring" | null;
+  modelSelection?: { instanceId?: string; provider?: string } | null;
 }
 
 interface Connection {
   token: string;
+  /** instanceId → driver, filled lazily for provider icons. */
+  drivers?: Map<string, string>;
+  icon?: { url: string; expiresAt: number };
   socket: RpcSocket;
   protocol: ProtocolAdapter;
   environmentId: string;
@@ -119,22 +131,75 @@ export class T3CodeProvider implements Provider {
     return () => this.#infoListeners.delete(listener);
   }
 
-  async listThreads(): Promise<ProviderThreadSummary[]> {
+  async listThreads(): Promise<{ project: ProviderProject; threads: ProviderThreadSummary[] }> {
     const connection = this.#requireConnection();
-    const shell = await this.#fetchJson<{ threads: WireShellThread[] }>(
-      "/api/orchestration/shell",
-      connection.token,
-    );
-    return shell.threads
+    const [shell, drivers, project] = await Promise.all([
+      this.#fetchJson<{ threads: WireShellThread[] }>("/api/orchestration/shell", connection.token),
+      this.#drivers(connection),
+      this.#projectPresentation(connection),
+    ]);
+    const threads = shell.threads
       .filter((thread) => thread.projectId === connection.project.id && !thread.archivedAt)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map((thread) => ({
-        id: thread.id,
-        title: thread.title,
-        status: summaryStatus(thread),
-        updatedAt: thread.updatedAt,
-        url: this.#threadUrl(connection, thread.id),
-      }));
+      .map((thread): ProviderThreadSummary => {
+        const pullRequest = thread.linkedPullRequest ?? thread.branchPullRequest;
+        const instance = thread.modelSelection?.instanceId ?? thread.modelSelection?.provider;
+        return {
+          id: thread.id,
+          title: thread.title,
+          status: summaryStatus(thread),
+          updatedAt: thread.updatedAt,
+          url: this.#threadUrl(connection, thread.id),
+          ...(thread.branch ? { branch: thread.branch } : {}),
+          ...(pullRequest
+            ? { pullRequest: { number: pullRequest.number, url: pullRequest.url } }
+            : {}),
+          ...(thread.backgroundLiveness ? { background: thread.backgroundLiveness } : {}),
+          ...(instance ? { agent: drivers.get(instance) ?? instance } : {}),
+        };
+      });
+    return { project, threads };
+  }
+
+  async #drivers(connection: Connection): Promise<Map<string, string>> {
+    if (connection.drivers) return connection.drivers;
+    const config = await connection.socket
+      .request<{ providers: WireServerProvider[] }>("server.getConfig", {})
+      .catch(() => ({ providers: [] }));
+    connection.drivers = new Map(
+      config.providers.map((provider) => [
+        provider.instanceId,
+        provider.driver ?? provider.instanceId,
+      ]),
+    );
+    return connection.drivers;
+  }
+
+  /** Name like `owner/repo` and the project icon, matching T3 Code's sidebar. */
+  async #projectPresentation(connection: Connection): Promise<ProviderProject> {
+    const { project } = connection;
+    const identity = project.repositoryIdentity;
+    const name =
+      identity?.owner && identity.name
+        ? `${identity.owner}/${identity.name}`
+        : (identity?.displayName ?? project.title);
+    const override = project.projectIcon;
+    if (override && override.kind === "emoji" && "emoji" in override) {
+      return { name, emoji: override.emoji };
+    }
+    if (!connection.icon || connection.icon.expiresAt - 30_000 < Date.now()) {
+      const signed = await connection.socket
+        .request<{ relativeUrl: string; expiresAt: number }>("assets.createUrl", {
+          resource: { _tag: "project-favicon", cwd: project.workspaceRoot },
+        })
+        .catch(() => null);
+      if (signed) {
+        // Older servers report seconds, newer ones milliseconds.
+        const expiresAt = signed.expiresAt < 1e12 ? signed.expiresAt * 1000 : signed.expiresAt;
+        connection.icon = { url: new URL(signed.relativeUrl, this.#baseUrl).toString(), expiresAt };
+      }
+    }
+    return connection.icon ? { name, iconUrl: connection.icon.url } : { name };
   }
 
   threadUrl(providerThreadId: string): string | undefined {

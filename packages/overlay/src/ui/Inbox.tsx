@@ -1,8 +1,10 @@
-import type { ProviderThreadSummary, Thread } from "@pinprompt/protocol";
+import type { ProviderProject, ProviderThreadSummary, Thread } from "@pinprompt/protocol";
 import { useEffect, useState } from "preact/hooks";
 import {
+  bridgeState,
   openProviderThread,
   provider,
+  providerProject,
   providerThreads,
   refreshProviderThreads,
   threads,
@@ -15,6 +17,7 @@ import {
   showResolved,
   sortedThreads,
 } from "../state.ts";
+import { AgentIcon } from "./agentIcons.tsx";
 import { CloseIcon } from "./icons.tsx";
 import { pinNumbers, pinVariant } from "./Pins.tsx";
 
@@ -27,9 +30,11 @@ export function Inbox() {
   const [scope, setScope] = useState<Scope>("page");
   const label = provider.value?.label ?? "Agent";
 
+  const ready = bridgeState.value === "open" && provider.value?.state === "ready";
+  // Re-request once the bridge or provider (re)connects; earlier requests are dropped.
   useEffect(() => {
-    if (inboxOpen.value && scope === "provider") refreshProviderThreads();
-  }, [scope, inboxOpen.value]);
+    if (ready && inboxOpen.value && scope === "provider") refreshProviderThreads();
+  }, [scope, inboxOpen.value, ready]);
 
   if (!inboxOpen.value) return null;
 
@@ -126,7 +131,9 @@ function ProviderList({ label }: { label: string }) {
   );
 }
 
+/** Mirrors a row in T3 Code's sidebar: project, title, then branch / PR / agent. */
 function ProviderItem({ summary }: { summary: ProviderThreadSummary }) {
+  const project = providerProject.value;
   const pins = [...threads.value.values()].filter(
     (thread) => thread.provider.threadId === summary.id && thread.anchor,
   ).length;
@@ -135,17 +142,43 @@ function ProviderItem({ summary }: { summary: ProviderThreadSummary }) {
     if (id) openThreadId.value = id;
   };
   return (
-    <button type="button" class="inbox-item" onClick={open}>
-      <span class={`thread-dot thread-dot-${summary.status}`} />
-      <span class="inbox-item-body">
-        <span class="inbox-item-title">{summary.title}</span>
-        <span class="inbox-item-meta">
-          {summaryLabel(summary.status)} · {timeAgo(summary.updatedAt)}
-          {pins > 0 && ` · ${pins} pin${pins === 1 ? "" : "s"}`}
-        </span>
+    <button type="button" class="inbox-item provider-item" onClick={open}>
+      <span class="provider-item-project">
+        {project && <ProjectIcon project={project} />}
+        <span class="provider-item-project-name">{project?.name}</span>
+        {summary.status === "working" || summary.status === "waiting" ? (
+          <span class={`provider-item-state state-${summary.status}`}>
+            {summaryLabel(summary.status)}
+          </span>
+        ) : summary.background === "monitoring" ? (
+          <span class="provider-item-state state-monitoring">Monitoring</span>
+        ) : (
+          <span class="provider-item-time">{timeAgo(summary.updatedAt)}</span>
+        )}
       </span>
+      <span class="provider-item-title">{summary.title}</span>
+      {(summary.branch || summary.pullRequest || summary.agent || pins > 0) && (
+        <span class="provider-item-meta">
+          {summary.branch && <span class="provider-item-branch">{summary.branch}</span>}
+          {summary.pullRequest && (
+            <span class="provider-item-pr">#{summary.pullRequest.number}</span>
+          )}
+          {pins > 0 && (
+            <span class="provider-item-pins">
+              {pins} pin{pins === 1 ? "" : "s"}
+            </span>
+          )}
+          <AgentIcon agent={summary.agent} />
+        </span>
+      )}
     </button>
   );
+}
+
+export function ProjectIcon({ project }: { project: ProviderProject }) {
+  if (project.emoji) return <span class="project-icon project-icon-emoji">{project.emoji}</span>;
+  if (project.iconUrl) return <img class="project-icon" src={project.iconUrl} alt="" />;
+  return <span class="project-icon project-icon-letter">{project.name.slice(0, 1)}</span>;
 }
 
 function InboxItem({ thread }: { thread: Thread }) {

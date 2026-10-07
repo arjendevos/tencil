@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Anchor, ElementContext, ImageAttachment } from "./context.ts";
-import type { ProviderThreadSummary, Thread } from "./thread.ts";
+import type { ProviderProject, ProviderThreadSummary, Thread } from "./thread.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -69,5 +69,5 @@ export type ServerMessage =
   | { type: "provider.status"; provider: ProviderInfo }
   | { type: "thread.upsert"; thread: Thread }
   | { type: "thread.removed"; threadId: string }
-  | { type: "provider.threads"; threads: ProviderThreadSummary[] }
+  | { type: "provider.threads"; project: ProviderProject; threads: ProviderThreadSummary[] }
   | { type: "error"; message: string; threadId?: string };

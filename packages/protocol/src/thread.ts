@@ -59,5 +59,20 @@ export const ProviderThreadSummary = z.object({
   status: z.enum(["working", "waiting", "idle", "error"]),
   updatedAt: z.string(),
   url: z.string().optional(),
+  branch: z.string().optional(),
+  pullRequest: z.object({ number: z.number(), url: z.string() }).optional(),
+  /** Work still running after the turn settled (subagents, watch loops). */
+  background: z.enum(["working", "monitoring"]).optional(),
+  /** Agent driver, e.g. `codex` or `claudeAgent`, for the provider icon. */
+  agent: z.string().optional(),
 });
 export type ProviderThreadSummary = z.infer<typeof ProviderThreadSummary>;
+
+/** How the provider presents the project the threads belong to. */
+export const ProviderProject = z.object({
+  name: z.string(),
+  /** Absolute URL of the project's favicon, if it has one. */
+  iconUrl: z.string().optional(),
+  emoji: z.string().optional(),
+});
+export type ProviderProject = z.infer<typeof ProviderProject>;

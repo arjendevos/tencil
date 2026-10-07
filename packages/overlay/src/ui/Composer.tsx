@@ -11,6 +11,7 @@ import {
 import { getHost } from "../host.ts";
 import { captureElement } from "../screenshot.ts";
 import { draft, layoutTick, openThreadId } from "../state.ts";
+import { AgentIcon } from "./agentIcons.tsx";
 import { timeAgo } from "./Inbox.tsx";
 import { CameraIcon, ChevronIcon, CodeIcon } from "./icons.tsx";
 import { PromptInput } from "./PromptInput.tsx";
@@ -33,9 +34,10 @@ export function Composer() {
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
 
+  const providerReady = provider.value?.state === "ready";
   useEffect(() => {
-    if (pending) refreshProviderThreads();
-  }, [pending]);
+    if (pending && providerReady) refreshProviderThreads();
+  }, [pending, providerReady]);
 
   useLayoutEffect(() => {
     if (ref.current) setHeight(ref.current.offsetHeight);
@@ -193,6 +195,7 @@ function TargetMenu({ onPick }: { onPick: (summary: ProviderThreadSummary | null
         >
           <span class={`thread-dot thread-dot-${summary.status}`} />
           <span class="target-option-title">{summary.title}</span>
+          <AgentIcon agent={summary.agent} size={12} />
           <span class="target-option-meta">{timeAgo(summary.updatedAt)}</span>
         </button>
       ))}

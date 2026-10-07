@@ -1,6 +1,7 @@
 import type {
   ClientMessageInput,
   ProviderInfo,
+  ProviderProject,
   ProviderThreadSummary,
   ServerMessage,
   Thread,
@@ -15,6 +16,7 @@ export const project = signal<{ name: string; root: string } | null>(null);
 export const threads = signal<ReadonlyMap<string, Thread>>(new Map());
 /** The provider's own threads for this project (null until first fetched). */
 export const providerThreads = signal<ProviderThreadSummary[] | null>(null);
+export const providerProject = signal<ProviderProject | null>(null);
 export const lastError = signal<{ message: string; threadId?: string; at: number } | null>(null);
 
 let socket: WebSocket | undefined;
@@ -91,7 +93,10 @@ function handle(message: ServerMessage): void {
       return;
     }
     case "provider.threads":
-      providerThreads.value = message.threads;
+      batch(() => {
+        providerThreads.value = message.threads;
+        providerProject.value = message.project;
+      });
       return;
     case "error":
       lastError.value = { message: message.message, threadId: message.threadId, at: Date.now() };

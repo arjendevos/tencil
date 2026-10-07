@@ -27,14 +27,17 @@ class FakeProvider implements Provider {
     return () => {};
   }
   async listThreads() {
-    return [
-      {
-        id: "p1",
-        title: "Existing work",
-        status: "idle" as const,
-        updatedAt: "2026-10-07T10:00:00.000Z",
-      },
-    ];
+    return {
+      project: { name: "acme/app" },
+      threads: [
+        {
+          id: "p1",
+          title: "Existing work",
+          status: "idle" as const,
+          updatedAt: "2026-10-07T10:00:00.000Z",
+        },
+      ],
+    };
   }
   threadUrl(id: string) {
     return `fake://${id}`;
@@ -77,7 +80,11 @@ describe("existing provider threads", () => {
   it("lists provider threads", async () => {
     const { bridge, client, received } = setup();
     await bridge.handle(client, { type: "provider.threads" });
-    expect(received.at(-1)).toMatchObject({ type: "provider.threads", threads: [{ id: "p1" }] });
+    expect(received.at(-1)).toMatchObject({
+      type: "provider.threads",
+      project: { name: "acme/app" },
+      threads: [{ id: "p1" }],
+    });
   });
 
   it("continues an existing thread from a pin with the element context", async () => {

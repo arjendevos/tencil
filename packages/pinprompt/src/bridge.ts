@@ -86,7 +86,7 @@ export class Bridge {
         case "provider.threads":
           client.send({
             type: "provider.threads",
-            threads: await this.#options.provider.listThreads(),
+            ...(await this.#options.provider.listThreads()),
           });
           return;
         case "thread.reply":
