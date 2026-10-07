@@ -73,6 +73,8 @@ that matches your dev site's folder, so you can continue any conversation there.
 | Pin a prompt | Click an element, type, <kbd>Enter</kbd> |
 | Cancel | <kbd>Esc</kbd> |
 | Follow up | Open a pin and reply; the same agent thread continues |
+| Continue an existing thread | In the composer, switch **→ New thread** to any thread in the project; the element becomes its next message |
+| Open any project thread | Inbox → **T3 Code** tab; the thread docks on the right so you can read, reply and stop while using the page |
 | Stop the agent | **Stop** while a pin is working |
 | All pins | Inbox button, filter by page or show resolved |
 | Continue in T3 Code | External-link icon on a pin |
