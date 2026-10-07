@@ -1,3 +1,4 @@
+import { useRef } from "preact/hooks";
 import { bridgeState, provider } from "../connection.ts";
 import {
   activeCount,
@@ -8,13 +9,15 @@ import {
   stopPicking,
   unresolvedCount,
 } from "../state.ts";
+import { dock, moveDockBy, startDrag } from "./dock.ts";
 import { CommentIcon, EyeIcon, EyeOffIcon, InboxIcon } from "./icons.tsx";
 
 export function Toolbar() {
   const status = connectionStatus();
   const picking = mode.value === "picking";
+  const ref = useRef<HTMLDivElement>(null);
   return (
-    <div class="toolbar-wrap">
+    <div ref={ref} class={`toolbar-wrap dock-${dock.value}`}>
       {picking && <div class="toolbar-hint">Click any element to pin a prompt · Esc to cancel</div>}
       {!picking && status.hint && (
         <div class={`toolbar-hint hint-${status.tone}`}>{status.hint}</div>
@@ -23,7 +26,16 @@ export function Toolbar() {
         <span class={`status-dot status-${status.tone}`} title={status.title}>
           {activeCount.value > 0 && <span class="status-ping" />}
         </span>
-        <span class="divider" />
+        <button
+          type="button"
+          class="grip"
+          aria-label="Move toolbar (drag, or use arrow keys)"
+          title="Drag to move"
+          onPointerDown={(event) => ref.current && startDrag(event, ref.current)}
+          onKeyDown={(event) => {
+            if (ref.current && moveDockBy(event.key, ref.current)) event.preventDefault();
+          }}
+        />
         <button
           type="button"
           class={`tool${picking ? " tool-active" : ""}`}

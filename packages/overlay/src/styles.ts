@@ -295,6 +295,7 @@ kbd {
   transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
   @starting-style { opacity: 0; transform: translateX(8px); }
 }
+.root:has(.dock-top-right) .inbox { top: 76px; bottom: 16px; }
 .inbox-header { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--n-200); }
 .inbox-header strong { font-size: 14px; font-weight: 500; }
 .segmented { display: flex; margin-left: auto; background: var(--n-100); border-radius: 9px; padding: 2px; }
@@ -314,10 +315,18 @@ kbd {
 
 /* --------------------------------- toolbar -------------------------------- */
 .toolbar-wrap {
-  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  position: fixed;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   pointer-events: none;
 }
+.toolbar-wrap[data-dragging] { cursor: grabbing; }
+.toolbar-wrap[data-dragging] .toolbar { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 20px 48px -8px rgba(0, 0, 0, 0.6); }
+.dock-bottom-center { left: 50%; bottom: 20px; transform: translateX(-50%); }
+.dock-bottom-left { left: 20px; bottom: 20px; align-items: flex-start; }
+.dock-bottom-right { right: 20px; bottom: 20px; align-items: flex-end; }
+.dock-top-center { left: 50%; top: 20px; transform: translateX(-50%); flex-direction: column-reverse; }
+.dock-top-left { left: 20px; top: 20px; align-items: flex-start; flex-direction: column-reverse; }
+.dock-top-right { right: 20px; top: 20px; align-items: flex-end; flex-direction: column-reverse; }
 .toolbar {
   pointer-events: auto;
   display: flex; align-items: center; gap: 2px;
@@ -343,7 +352,16 @@ kbd {
 .status-error { background: #ff6369; }
 .status-ping { position: absolute; inset: -3px; border-radius: 999px; border: 2px solid var(--accent); animation: ping 1.2s var(--ease-out) infinite; }
 @keyframes ping { to { transform: scale(1.9); opacity: 0; } }
-.divider { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.1); margin: 0 2px; }
+/* Doubles as the separator: a 2x3 dot grip you can grab. */
+.grip {
+  --dot: rgba(255, 255, 255, 0.3);
+  width: 14px; height: 24px; margin: 0 1px; padding: 4px 2px; border-radius: 6px;
+  cursor: grab; touch-action: none;
+  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.5px);
+  background-size: 5px 5px; background-repeat: space; background-origin: content-box; background-clip: content-box;
+}
+.grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+[data-dragging] .grip { cursor: grabbing; }
 .tool {
   position: relative; height: 32px; min-width: 32px; padding: 0 9px;
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
@@ -378,6 +396,7 @@ kbd {
   .pin:hover .pin-body { transform: scale(1.1); }
   .tool:not(.tool-active):hover { background: rgba(255, 255, 255, 0.08); color: white; }
   .icon-button:hover { background: var(--n-100); color: var(--n-950); }
+  .grip:hover { --dot: rgba(255, 255, 255, 0.6); }
   .toggle:hover, .stop:hover { background: var(--n-100); }
   .inbox-item:hover { background: var(--n-100); }
   .md a:hover { opacity: 0.8; }

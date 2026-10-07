@@ -180,11 +180,7 @@ function Shimmer({ text }: { text: string }) {
     <span class="shimmer">
       <span class="sr-only">{text}</span>
       {characters.map((character, index) => (
-        <span
-          key={index}
-          aria-hidden="true"
-          style={{ "--i": index, "--n": characters.length }}
-        >
+        <span key={index} aria-hidden="true" style={{ "--i": index, "--n": characters.length }}>
           {character}
         </span>
       ))}
