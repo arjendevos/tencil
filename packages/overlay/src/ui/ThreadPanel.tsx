@@ -1,4 +1,4 @@
-import type { Thread } from "@pinprompt/protocol";
+import type { Thread, ThreadMessage } from "@pinprompt/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { provider, send, threads } from "../connection.ts";
 import { layoutTick, openThreadId } from "../state.ts";
@@ -34,13 +34,18 @@ export function ThreadPanel() {
     x: window.innerWidth / 2 - WIDTH / 2,
     y: window.innerHeight / 3,
   };
-  const { left, top } = popoverPosition(point, { width: WIDTH, height });
+  const { left, top, origin } = popoverPosition(point, { width: WIDTH, height });
 
   return (
     <div
       ref={ref}
       class="popover thread"
-      style={{ left: `${left}px`, top: `${top}px`, width: `${WIDTH}px` }}
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${WIDTH}px`,
+        transformOrigin: origin,
+      }}
     >
       <Header thread={thread} />
       <Messages thread={thread} />
@@ -127,6 +132,7 @@ function Header({ thread }: { thread: Thread }) {
 
 function Messages({ thread }: { thread: Thread }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
   const last = thread.messages[thread.messages.length - 1];
 
   // Follow streaming output unless the user scrolled up to read.
@@ -138,20 +144,51 @@ function Messages({ thread }: { thread: Thread }) {
   }, [last?.id, last?.text.length]);
 
   return (
-    <div ref={ref} class="messages">
+    <div
+      ref={ref}
+      class="messages"
+      data-scrolled={scrolled || undefined}
+      onScroll={(event) => setScrolled((event.target as HTMLDivElement).scrollTop > 4)}
+    >
       {thread.messages.map((message) =>
         message.role === "user" ? (
           <div key={message.id} class="message message-user">
             {message.text}
           </div>
         ) : (
-          <div key={message.id} class="message message-assistant">
-            <Markdown text={message.text} />
-            {message.streaming && <span class="caret" />}
-          </div>
+          <AssistantMessage key={message.id} message={message} />
         ),
       )}
     </div>
+  );
+}
+
+/** Only messages that were streaming when they mounted animate; history renders still. */
+function AssistantMessage({ message }: { message: ThreadMessage }) {
+  const [animate] = useState(message.streaming);
+  return (
+    <div class="message message-assistant">
+      <Markdown text={message.text} animate={animate} />
+    </div>
+  );
+}
+
+/** Per-character color wave; screen readers get the plain label. */
+function Shimmer({ text }: { text: string }) {
+  const characters = [...text];
+  return (
+    <span class="shimmer">
+      <span class="sr-only">{text}</span>
+      {characters.map((character, index) => (
+        <span
+          key={index}
+          aria-hidden="true"
+          style={{ "--i": index, "--n": characters.length }}
+        >
+          {character}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -159,16 +196,16 @@ function StatusLine({ thread }: { thread: Thread }) {
   if (thread.status === "starting") {
     return (
       <div class="status-line">
-        <span class="dots" />
-        Starting a thread in {provider.value?.label ?? "the agent"}…
+        <span class="live-dot" />
+        <Shimmer text={`Starting a thread in ${provider.value?.label ?? "the agent"}…`} />
       </div>
     );
   }
   if (thread.status === "working") {
     return (
       <div class="status-line">
-        <span class="dots" />
-        Working…
+        <span class="live-dot" />
+        <Shimmer text="Working…" />
         <button
           type="button"
           class="stop"
