@@ -1,0 +1,70 @@
+import type { Anchor, ElementContext } from "@pinprompt/protocol";
+import { computed, signal } from "@preact/signals";
+import { threads } from "./connection.ts";
+
+export type Mode = "idle" | "picking";
+
+export interface Draft {
+  element: Element;
+  anchor: Anchor;
+  /** Component name or tag, available synchronously for the composer chip. */
+  label: string;
+  /** Source maps are fetched lazily, so the full context resolves later. */
+  context: Promise<ElementContext>;
+}
+
+export const mode = signal<Mode>("idle");
+export const hovered = signal<Element | null>(null);
+export const draft = signal<Draft | null>(null);
+export const openThreadId = signal<string | null>(null);
+export const inboxOpen = signal(false);
+export const showResolved = signal(false);
+export const hidden = signal(false);
+
+/** Bumped on scroll/resize/mutations so anchored UI re-measures. */
+export const layoutTick = signal(0);
+
+/** SPA-aware current page, compared without hash/query noise. */
+export const currentPage = signal(pageKey(location.href));
+
+export function pageKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname.replace(/\/$/, "") || "/"}`;
+  } catch {
+    return url;
+  }
+}
+
+export const sortedThreads = computed(() =>
+  [...threads.value.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+);
+
+export const pageThreads = computed(() =>
+  sortedThreads.value
+    .filter((thread) => pageKey(thread.pageUrl) === currentPage.value)
+    .filter((thread) => showResolved.value || !thread.resolved)
+    .reverse(),
+);
+
+export const unresolvedCount = computed(
+  () => sortedThreads.value.filter((thread) => !thread.resolved).length,
+);
+
+export const activeCount = computed(
+  () =>
+    sortedThreads.value.filter(
+      (thread) => thread.status === "working" || thread.status === "starting",
+    ).length,
+);
+
+export function startPicking(): void {
+  draft.value = null;
+  openThreadId.value = null;
+  mode.value = "picking";
+}
+
+export function stopPicking(): void {
+  mode.value = "idle";
+  hovered.value = null;
+}

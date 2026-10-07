@@ -1,0 +1,24 @@
+{
+  "name": "@pinprompt/overlay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@preact/signals": "^2.11.3",
+    "bippy": "^0.7.3",
+    "modern-screenshot": "^4.7.0",
+    "preact": "^11.0.0"
+  },
+  "devDependencies": {
+    "@pinprompt/protocol": "workspace:*",
+    "tsdown": "^0.23.0"
+  }
+}

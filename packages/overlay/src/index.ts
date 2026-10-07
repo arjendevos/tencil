@@ -1,0 +1,68 @@
+import { h, render } from "preact";
+import { connect } from "./connection.ts";
+import { setHost } from "./host.ts";
+import { installPicker } from "./picker.ts";
+import { styles } from "./styles.ts";
+import { App } from "./ui/App.tsx";
+
+declare global {
+  interface Window {
+    __PINPROMPT__?: { version: 1; bridgeUrl: string; destroy(): void };
+  }
+}
+
+const DEFAULT_BRIDGE = "http://localhost:4747";
+
+function bridgeUrlFromScript(): string {
+  const script = document.currentScript as HTMLScriptElement | null;
+  if (script?.dataset.bridge) return script.dataset.bridge;
+  if (script?.src) return new URL(script.src).origin;
+  return DEFAULT_BRIDGE;
+}
+
+function mount(bridgeUrl: string): void {
+  const host = document.createElement("pinprompt-overlay");
+  host.setAttribute("data-pinprompt", "");
+  host.style.cssText =
+    "position:fixed;inset:0;pointer-events:none;z-index:2147483646;display:block;contain:layout style;";
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = styles;
+  // Pages with a strict CSP usually already pass a nonce to their own scripts.
+  const nonce = document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
+  if (nonce) style.nonce = nonce;
+  shadow.append(style);
+  const container = document.createElement("div");
+  shadow.append(container);
+
+  setHost(host);
+  document.body.append(host);
+
+  // Frameworks occasionally wipe <body> children during hydration; put us back.
+  const keepAlive = new MutationObserver(() => {
+    if (!host.isConnected) document.body.append(host);
+  });
+  keepAlive.observe(document.body, { childList: true });
+
+  const uninstall = installPicker(host);
+  render(h(App, {}), container);
+  connect(bridgeUrl);
+
+  window.__PINPROMPT__ = {
+    version: 1,
+    bridgeUrl,
+    destroy() {
+      keepAlive.disconnect();
+      uninstall();
+      render(null, container);
+      host.remove();
+      window.__PINPROMPT__ = undefined;
+    },
+  };
+}
+
+if (typeof window !== "undefined" && !window.__PINPROMPT__) {
+  const bridgeUrl = bridgeUrlFromScript();
+  if (document.body) mount(bridgeUrl);
+  else document.addEventListener("DOMContentLoaded", () => mount(bridgeUrl), { once: true });
+}
