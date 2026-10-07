@@ -25,7 +25,7 @@ export function Composer() {
   if (!pending) return null;
   const point = resolveAnchor(pending.anchor, pending.element);
   if (!point) return null;
-  const { left, top } = popoverPosition(point, { width: WIDTH, height });
+  const { left, top, origin } = popoverPosition(point, { width: WIDTH, height });
   const target = provider.value;
   const ready = target?.state === "ready";
 
@@ -78,7 +78,12 @@ export function Composer() {
     <div
       ref={ref}
       class="popover composer"
-      style={{ left: `${left}px`, top: `${top}px`, width: `${WIDTH}px` }}
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${WIDTH}px`,
+        transformOrigin: origin,
+      }}
     >
       <div class="composer-target">
         <span class="chip">

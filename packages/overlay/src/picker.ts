@@ -46,6 +46,11 @@ export function installPicker(host: HTMLElement): () => void {
   };
 
   const block = (event: Event) => {
+    // Clicking the page dismisses an open pin (the page still gets the click).
+    if (mode.value === "idle" && event.type === "pointerdown" && !isOurs(event)) {
+      openThreadId.value = null;
+      return;
+    }
     if (mode.value !== "picking" || isOurs(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();

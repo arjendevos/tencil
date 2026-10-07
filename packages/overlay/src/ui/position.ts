@@ -37,7 +37,7 @@ export function popoverPosition(
   point: Point,
   size: { width: number; height: number },
   gap = 16,
-): { left: number; top: number } {
+): { left: number; top: number; origin: string } {
   const margin = 12;
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
@@ -45,7 +45,9 @@ export function popoverPosition(
   if (left + size.width > viewportWidth - margin) left = point.x - gap - size.width;
   left = clamp(left, margin, viewportWidth - size.width - margin);
   const top = clamp(point.y - 24, margin, viewportHeight - size.height - margin);
-  return { left, top };
+  // Grow out of the pin rather than the popover's center.
+  const origin = `${clamp(point.x - left, 0, size.width)}px ${clamp(point.y - top, 0, size.height)}px`;
+  return { left, top, origin };
 }
 
 function clamp(value: number, min: number, max: number): number {
