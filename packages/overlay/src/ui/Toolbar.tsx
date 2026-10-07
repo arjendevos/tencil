@@ -28,7 +28,7 @@ export function Toolbar() {
         </span>
         <button
           type="button"
-          class="grip"
+          class="divider"
           aria-label="Move toolbar (drag, or use arrow keys)"
           title="Drag to move"
           onPointerDown={(event) => ref.current && startDrag(event, ref.current)}

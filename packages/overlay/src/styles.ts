@@ -320,7 +320,11 @@ kbd {
   pointer-events: none;
 }
 .toolbar-wrap[data-dragging] { cursor: grabbing; }
-.toolbar-wrap[data-dragging] .toolbar { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 20px 48px -8px rgba(0, 0, 0, 0.6); }
+.toolbar { transition: scale 160ms var(--ease-out), box-shadow 160ms var(--ease-out); }
+.toolbar-wrap[data-dragging] .toolbar {
+  scale: 1.03;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 24px 56px -10px rgba(0, 0, 0, 0.6);
+}
 .dock-bottom-center { left: 50%; bottom: 20px; transform: translateX(-50%); }
 .dock-bottom-left { left: 20px; bottom: 20px; align-items: flex-start; }
 .dock-bottom-right { right: 20px; bottom: 20px; align-items: flex-end; }
@@ -352,16 +356,20 @@ kbd {
 .status-error { background: #ff6369; }
 .status-ping { position: absolute; inset: -3px; border-radius: 999px; border: 2px solid var(--accent); animation: ping 1.2s var(--ease-out) infinite; }
 @keyframes ping { to { transform: scale(1.9); opacity: 0; } }
-/* Doubles as the separator: a 2x3 dot grip you can grab. */
-.grip {
-  --dot: rgba(255, 255, 255, 0.3);
-  width: 14px; height: 24px; margin: 0 1px; padding: 4px 2px; border-radius: 6px;
+/* The separator line is also the drag handle; the hit area is wider than the line. */
+.divider {
+  position: relative; width: 11px; height: 28px; margin: 0 -2px;
   cursor: grab; touch-action: none;
-  background-image: radial-gradient(circle, var(--dot) 1px, transparent 1.5px);
-  background-size: 5px 5px; background-repeat: space; background-origin: content-box; background-clip: content-box;
 }
-.grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-[data-dragging] .grip { cursor: grabbing; }
+.divider::before {
+  content: ""; position: absolute; left: 5px; top: 5px; bottom: 5px; width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background-color 150ms ease;
+}
+.divider:focus-visible { outline: none; }
+.divider:focus-visible::before { background: var(--accent); }
+[data-dragging] .divider { cursor: grabbing; }
+[data-dragging] .divider::before { background: rgba(255, 255, 255, 0.35); }
 .tool {
   position: relative; height: 32px; min-width: 32px; padding: 0 9px;
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
@@ -396,7 +404,7 @@ kbd {
   .pin:hover .pin-body { transform: scale(1.1); }
   .tool:not(.tool-active):hover { background: rgba(255, 255, 255, 0.08); color: white; }
   .icon-button:hover { background: var(--n-100); color: var(--n-950); }
-  .grip:hover { --dot: rgba(255, 255, 255, 0.6); }
+  .divider:hover::before { background: rgba(255, 255, 255, 0.35); }
   .toggle:hover, .stop:hover { background: var(--n-100); }
   .inbox-item:hover { background: var(--n-100); }
   .md a:hover { opacity: 0.8; }

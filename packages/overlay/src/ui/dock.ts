@@ -20,7 +20,8 @@ const DOCKS: Dock[] = [
 const DRAG_THRESHOLD = 3;
 /** How far ahead a flick carries the toolbar when picking where it lands. */
 const MOMENTUM_MS = 120;
-const SNAP = "translate 420ms cubic-bezier(0.23, 1, 0.32, 1)";
+/** Drawer-style curve: quick to leave the hand, soft to land. */
+const SNAP = "translate 340ms cubic-bezier(0.32, 0.72, 0, 1)";
 
 export const dock = signal<Dock>(readDock());
 
@@ -102,7 +103,7 @@ export function startDrag(event: PointerEvent, element: HTMLElement): void {
     const elapsed = first && last ? Math.max(1, last.t - first.t) : 1;
     const vx = first && last ? (last.x - first.x) / elapsed : 0;
     const vy = first && last ? (last.y - first.y) / elapsed : 0;
-    const rect = element.getBoundingClientRect();
+    const rect = barRect(element);
     const target = nearestDock(
       rect.left + rect.width / 2 + vx * MOMENTUM_MS,
       rect.top + rect.height / 2 + vy * MOMENTUM_MS,
@@ -139,7 +140,8 @@ function settle(element: HTMLElement, from: DOMRect, target: Dock): void {
   // Wait for the dock class to apply, then animate from the release point.
   requestAnimationFrame(() => {
     element.style.translate = "";
-    const to = element.getBoundingClientRect();
+    // Measure the bar, not the wrapper: the hint changes the wrapper's alignment per dock.
+    const to = barRect(element);
     element.style.translate = `${from.left - to.left}px ${from.top - to.top}px`;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     requestAnimationFrame(() => {
@@ -153,4 +155,8 @@ function settle(element: HTMLElement, from: DOMRect, target: Dock): void {
       else element.addEventListener("transitionend", cleanup, { once: true });
     });
   });
+}
+
+function barRect(element: HTMLElement): DOMRect {
+  return (element.querySelector(".toolbar") ?? element).getBoundingClientRect();
 }
