@@ -1,0 +1,384 @@
+import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import { basename } from "node:path";
+import type {
+  CreatedThread,
+  CreateThreadInput,
+  Provider,
+  ProviderInfo,
+  SendMessageInput,
+  ThreadSink,
+} from "@pinprompt/protocol";
+import type { ModelSelection, ProtocolAdapter, RuntimeMode, ThreadTracker } from "./adapter.ts";
+import {
+  CredentialStore,
+  DEFAULT_T3_URL,
+  normalizeBaseUrl,
+  requestWebSocketTicket,
+  UnauthorizedError,
+} from "./auth.ts";
+import { RpcError, RpcSocket } from "./rpc.ts";
+import { v1 } from "./v1.ts";
+import { v2 } from "./v2.ts";
+
+export interface T3CodeProviderOptions {
+  /** Directory the dev site lives in; mapped to a T3 Code project by workspace root. */
+  projectRoot: string;
+  /** Defaults to the server `pinprompt connect` paired with last, then localhost:3773. */
+  baseUrl?: string;
+  /** Explicit bearer token. Defaults to the one stored by `pinprompt connect`. */
+  token?: string;
+  credentials?: CredentialStore;
+  modelSelection?: ModelSelection;
+  runtimeMode?: RuntimeMode;
+  interactionMode?: "default" | "plan";
+  /** Register `projectRoot` as a T3 Code project when no project matches. */
+  createProjectIfMissing?: boolean;
+  log?: (message: string) => void;
+}
+
+interface WireProject {
+  id: string;
+  title: string;
+  workspaceRoot: string;
+  defaultModelSelection?: ModelSelection | null;
+}
+
+interface WireServerProvider {
+  instanceId: string;
+  enabled: boolean;
+  installed: boolean;
+  status: string;
+  models: Array<{ slug: string; isDefault?: boolean }>;
+}
+
+interface Watcher {
+  sink: ThreadSink;
+  tracker: ThreadTracker;
+  cancel?: () => void;
+}
+
+interface Connection {
+  socket: RpcSocket;
+  protocol: ProtocolAdapter;
+  environmentId: string;
+  project: WireProject;
+  modelSelection: ModelSelection;
+}
+
+const RETRY_MIN_MS = 1_000;
+const RETRY_MAX_MS = 15_000;
+
+export class T3CodeProvider implements Provider {
+  readonly id = "t3code";
+  readonly label = "T3 Code";
+
+  readonly #options: T3CodeProviderOptions;
+  readonly #credentials: CredentialStore;
+  #baseUrl: string;
+  #info: ProviderInfo = { id: "t3code", label: "T3 Code", state: "connecting" };
+  #infoListeners = new Set<(info: ProviderInfo) => void>();
+  #connection: Connection | undefined;
+  #watchers = new Map<string, Watcher>();
+  #retryDelay = RETRY_MIN_MS;
+  #retryTimer: ReturnType<typeof setTimeout> | undefined;
+  #disposed = false;
+
+  constructor(options: T3CodeProviderOptions) {
+    this.#options = options;
+    this.#baseUrl = normalizeBaseUrl(options.baseUrl ?? DEFAULT_T3_URL);
+    this.#credentials = options.credentials ?? new CredentialStore();
+  }
+
+  async start(): Promise<void> {
+    await this.#connect();
+  }
+
+  info(): ProviderInfo {
+    return this.#info;
+  }
+
+  onInfoChange(listener: (info: ProviderInfo) => void): () => void {
+    this.#infoListeners.add(listener);
+    return () => this.#infoListeners.delete(listener);
+  }
+
+  async createThread(input: CreateThreadInput): Promise<CreatedThread> {
+    const connection = this.#requireConnection();
+    const threadId = randomUUID();
+    await connection.protocol.startThread(connection.socket, {
+      threadId,
+      projectId: connection.project.id,
+      title: input.title,
+      text: input.text,
+      attachments: input.attachments,
+      modelSelection: connection.modelSelection,
+      runtimeMode: this.#runtimeMode(),
+      interactionMode: this.#options.interactionMode ?? "default",
+    });
+    return {
+      providerThreadId: threadId,
+      url: `${this.#baseUrl}/${connection.environmentId}/${threadId}`,
+    };
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<void> {
+    const connection = this.#requireConnection();
+    const tracker = this.#watchers.get(input.providerThreadId)?.tracker;
+    await connection.protocol.sendMessage(connection.socket, {
+      threadId: input.providerThreadId,
+      text: input.text,
+      attachments: input.attachments,
+      busy: tracker?.status().status === "working",
+      runtimeMode: this.#runtimeMode(),
+      interactionMode: this.#options.interactionMode ?? "default",
+    });
+  }
+
+  async interrupt(providerThreadId: string): Promise<void> {
+    const connection = this.#requireConnection();
+    const turnId = this.#watchers.get(providerThreadId)?.tracker.activeTurnId();
+    if (!turnId) return;
+    await connection.protocol.interrupt(connection.socket, providerThreadId, turnId);
+  }
+
+  watch(providerThreadId: string, sink: ThreadSink): () => void {
+    this.#watchers.get(providerThreadId)?.cancel?.();
+    const watcher: Watcher = {
+      sink,
+      tracker: (this.#connection?.protocol ?? v1).createTracker(),
+    };
+    this.#watchers.set(providerThreadId, watcher);
+    if (this.#connection) this.#subscribe(this.#connection, providerThreadId, watcher);
+    return () => {
+      watcher.cancel?.();
+      if (this.#watchers.get(providerThreadId) === watcher) this.#watchers.delete(providerThreadId);
+    };
+  }
+
+  async dispose(): Promise<void> {
+    this.#disposed = true;
+    clearTimeout(this.#retryTimer);
+    for (const watcher of this.#watchers.values()) watcher.cancel?.();
+    this.#watchers.clear();
+    this.#connection?.socket.close();
+    this.#connection = undefined;
+  }
+
+  /* -------------------------------- connection ------------------------------- */
+
+  async #connect(): Promise<void> {
+    if (this.#disposed) return;
+    try {
+      const connection = await this.#establish();
+      this.#connection = connection;
+      this.#retryDelay = RETRY_MIN_MS;
+      this.#setInfo({ state: "ready", target: connection.project.title });
+      this.#log(
+        `Connected to T3 Code at ${this.#baseUrl} · project "${connection.project.title}" · ${connection.modelSelection.instanceId}/${connection.modelSelection.model} · protocol v${connection.protocol.version}`,
+      );
+      for (const [threadId, watcher] of this.#watchers) {
+        this.#subscribe(connection, threadId, watcher);
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedError) {
+        this.#setInfo({ state: "unauthorized", detail: error.message });
+      } else {
+        this.#setInfo({ state: "unavailable", detail: errorMessage(error) });
+      }
+      this.#scheduleReconnect();
+    }
+  }
+
+  async #establish(): Promise<Connection> {
+    if (!this.#options.baseUrl) {
+      const paired = await this.#credentials.lastBaseUrl();
+      if (paired) this.#baseUrl = normalizeBaseUrl(paired);
+    }
+    const environment = await this.#fetchJson<{
+      environmentId: string;
+      orchestrationProtocolVersion?: number;
+    }>(
+      "/.well-known/t3/environment",
+      undefined,
+      `T3 Code is not reachable at ${this.#baseUrl}. Is it running?`,
+    );
+    const protocol = environment.orchestrationProtocolVersion === 2 ? v2 : v1;
+
+    const token = this.#options.token ?? (await this.#credentials.get(this.#baseUrl))?.token;
+    if (!token) throw new UnauthorizedError();
+
+    const ticket = await requestWebSocketTicket(this.#baseUrl, token);
+    const wsUrl = new URL("/ws", this.#baseUrl);
+    wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+    if (protocol.version === 2) wsUrl.searchParams.set("orchestrationProtocol", "2");
+    wsUrl.searchParams.set("wsTicket", ticket);
+    const socket = await RpcSocket.open(wsUrl.toString());
+
+    try {
+      const project = await this.#resolveProject(socket, protocol, token);
+      const modelSelection =
+        this.#options.modelSelection ??
+        project.defaultModelSelection ??
+        (await this.#defaultModelSelection(socket));
+
+      socket.onClose((reason) => {
+        if (this.#connection?.socket !== socket) return;
+        this.#connection = undefined;
+        for (const watcher of this.#watchers.values()) watcher.cancel = undefined;
+        this.#setInfo({ state: "connecting", detail: `Reconnecting (${reason})` });
+        this.#scheduleReconnect();
+      });
+      return {
+        socket,
+        protocol,
+        environmentId: environment.environmentId,
+        project,
+        modelSelection,
+      };
+    } catch (error) {
+      socket.close();
+      throw error;
+    }
+  }
+
+  #scheduleReconnect(): void {
+    if (this.#disposed) return;
+    clearTimeout(this.#retryTimer);
+    this.#retryTimer = setTimeout(() => void this.#connect(), this.#retryDelay);
+    this.#retryDelay = Math.min(this.#retryDelay * 2, RETRY_MAX_MS);
+  }
+
+  async #resolveProject(
+    socket: RpcSocket,
+    protocol: ProtocolAdapter,
+    token: string,
+  ): Promise<WireProject> {
+    const root = await realpath(this.#options.projectRoot).catch(() => this.#options.projectRoot);
+    const shell = await this.#fetchJson<{ projects: WireProject[] }>(
+      "/api/orchestration/shell",
+      token,
+    );
+    // Deepest workspace root containing the dev project wins, so a package in a
+    // monorepo maps to the repo-level project when it has none of its own.
+    let match: WireProject | undefined;
+    for (const project of shell.projects) {
+      const projectRoot = await realpath(project.workspaceRoot).catch(() => project.workspaceRoot);
+      const contains = root === projectRoot || root.startsWith(`${projectRoot}/`);
+      if (contains && (!match || projectRoot.length > match.workspaceRoot.length)) {
+        match = { ...project, workspaceRoot: projectRoot };
+      }
+    }
+    if (match) return match;
+
+    if (!this.#options.createProjectIfMissing) {
+      throw new Error(`No T3 Code project for ${root}. Add the folder in T3 Code first.`);
+    }
+    const project: WireProject = {
+      id: randomUUID(),
+      title: basename(root),
+      workspaceRoot: root,
+      defaultModelSelection: null,
+    };
+    await protocol.createProject(socket, {
+      projectId: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+    });
+    this.#log(`Added ${root} to T3 Code as project "${project.title}"`);
+    return project;
+  }
+
+  async #defaultModelSelection(socket: RpcSocket): Promise<ModelSelection> {
+    const config = await socket.request<{ providers: WireServerProvider[] }>(
+      "server.getConfig",
+      {},
+    );
+    const usable = config.providers.filter(
+      (provider) => provider.enabled && provider.installed && provider.status !== "error",
+    );
+    const provider = usable.find((p) => p.status === "ready") ?? usable[0];
+    const model = provider?.models.find((m) => m.isDefault) ?? provider?.models[0];
+    if (!provider || !model) {
+      throw new Error(
+        "T3 Code has no usable provider. Set one up in T3 Code → Settings → Providers.",
+      );
+    }
+    return { instanceId: provider.instanceId, model: model.slug };
+  }
+
+  /* --------------------------------- threads --------------------------------- */
+
+  #subscribe(connection: Connection, threadId: string, watcher: Watcher): void {
+    watcher.cancel?.();
+    // Each subscription replays a full snapshot, so start from a clean slate.
+    watcher.tracker = connection.protocol.createTracker();
+    const stream = connection.socket.stream<unknown>(
+      "orchestration.subscribeThread",
+      { threadId },
+      (item) => {
+        const update = watcher.tracker.apply(item);
+        for (const message of update.messages) watcher.sink.message(message);
+        if (update.status) watcher.sink.status(update.status.status, update.status.detail);
+        if (update.gone) watcher.sink.gone();
+      },
+    );
+    watcher.cancel = stream.cancel;
+    stream.done.catch((error: unknown) => {
+      if (error instanceof RpcError && /not.?found/i.test(`${error.tag} ${error.message}`)) {
+        watcher.sink.gone();
+      }
+    });
+  }
+
+  /* --------------------------------- helpers --------------------------------- */
+
+  #runtimeMode(): RuntimeMode {
+    return this.#options.runtimeMode ?? "full-access";
+  }
+
+  #requireConnection(): Connection {
+    if (!this.#connection) {
+      throw new Error(this.#info.detail ?? "T3 Code is not connected yet");
+    }
+    return this.#connection;
+  }
+
+  async #fetchJson<T>(path: string, token?: string, unreachableMessage?: string): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(new URL(path, this.#baseUrl), {
+        headers: {
+          "x-t3-orchestration-protocol": "2",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+      });
+    } catch {
+      throw new Error(unreachableMessage ?? `Request to ${path} failed`);
+    }
+    if (response.status === 401 || response.status === 403) throw new UnauthorizedError();
+    if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+    return (await response.json()) as T;
+  }
+
+  #setInfo(next: Omit<ProviderInfo, "id" | "label">): void {
+    const info: ProviderInfo = { id: this.id, label: this.label, ...next };
+    if (
+      info.state === this.#info.state &&
+      info.detail === this.#info.detail &&
+      info.target === this.#info.target
+    ) {
+      return;
+    }
+    this.#info = info;
+    for (const listener of this.#infoListeners) listener(info);
+  }
+
+  #log(message: string): void {
+    this.#options.log?.(message);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
