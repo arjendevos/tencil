@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Anchor, ElementContext, ImageAttachment } from "./context.ts";
-import type { Thread } from "./thread.ts";
+import type { ProviderThreadSummary, Thread } from "./thread.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -21,7 +21,17 @@ export const ClientMessage = z.discriminatedUnion("type", [
     anchor: Anchor,
     context: ElementContext,
     attachments: z.array(ImageAttachment).max(4).default([]),
+    /** Continue this existing provider thread instead of starting a new one. */
+    providerThreadId: z.string().optional(),
   }),
+  /** Track an existing provider thread without pinning it to an element. */
+  z.object({
+    type: z.literal("thread.open"),
+    id: z.string().min(1).max(64),
+    providerThreadId: z.string(),
+    title: z.string().optional(),
+  }),
+  z.object({ type: z.literal("provider.threads") }),
   z.object({
     type: z.literal("thread.reply"),
     threadId: z.string(),
@@ -59,4 +69,5 @@ export type ServerMessage =
   | { type: "provider.status"; provider: ProviderInfo }
   | { type: "thread.upsert"; thread: Thread }
   | { type: "thread.removed"; threadId: string }
+  | { type: "provider.threads"; threads: ProviderThreadSummary[] }
   | { type: "error"; message: string; threadId?: string };

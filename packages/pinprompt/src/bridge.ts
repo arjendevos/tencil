@@ -33,7 +33,8 @@ const BROADCAST_THROTTLE_MS = 80;
 export class Bridge {
   readonly #options: BridgeOptions;
   readonly #clients = new Set<BridgeClient>();
-  readonly #unwatch = new Map<string, () => void>();
+  /** One provider subscription per provider thread, shared by every pin bound to it. */
+  readonly #watches = new Map<string, () => void>();
   readonly #pendingBroadcast = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #offInfo: () => void;
 
@@ -44,7 +45,7 @@ export class Bridge {
     );
     for (const thread of options.store.list()) {
       if (thread.provider.id === options.provider.id && thread.provider.threadId) {
-        this.#watch(thread.id, thread.provider.threadId);
+        this.#watch(thread.provider.threadId);
       }
     }
   }
@@ -77,7 +78,16 @@ export class Bridge {
           });
           return;
         case "thread.create":
-          await this.#create(message);
+          await (message.providerThreadId ? this.#continue(message) : this.#create(message));
+          return;
+        case "thread.open":
+          this.#open(message);
+          return;
+        case "provider.threads":
+          client.send({
+            type: "provider.threads",
+            threads: await this.#options.provider.listThreads(),
+          });
           return;
         case "thread.reply":
           await this.#reply(message);
@@ -92,13 +102,14 @@ export class Bridge {
         case "thread.resolve":
           this.#update(message.threadId, (thread) => ({ ...thread, resolved: message.resolved }));
           return;
-        case "thread.delete":
-          this.#unwatch.get(message.threadId)?.();
-          this.#unwatch.delete(message.threadId);
+        case "thread.delete": {
+          const providerThreadId = this.#options.store.get(message.threadId)?.provider.threadId;
           if (this.#options.store.delete(message.threadId)) {
             this.#broadcast({ type: "thread.removed", threadId: message.threadId });
           }
+          if (providerThreadId) this.#release(providerThreadId);
           return;
+        }
       }
     } catch (error) {
       const threadId = "threadId" in message ? message.threadId : undefined;
@@ -112,7 +123,7 @@ export class Bridge {
 
   async dispose(): Promise<void> {
     this.#offInfo();
-    for (const unwatch of this.#unwatch.values()) unwatch();
+    for (const unwatch of this.#watches.values()) unwatch();
     for (const timer of this.#pendingBroadcast.values()) clearTimeout(timer);
     await this.#options.store.flush();
   }
@@ -155,7 +166,7 @@ export class Bridge {
         status: "working",
         provider: { id: provider.id, threadId: created.providerThreadId, url: created.url },
       }));
-      this.#watch(thread.id, created.providerThreadId);
+      this.#watch(created.providerThreadId);
       this.#options.log?.(`Pin "${thread.title}" → ${provider.label}`);
     } catch (error) {
       this.#update(thread.id, (current) => ({
@@ -164,6 +175,85 @@ export class Bridge {
         statusDetail: error instanceof Error ? error.message : String(error),
       }));
     }
+  }
+
+  /** Pin an element onto an existing provider thread: the prompt becomes its next message. */
+  async #continue(message: Extract<ClientMessage, { type: "thread.create" }>): Promise<void> {
+    const { provider, store } = this.#options;
+    const providerThreadId = message.providerThreadId!;
+    if (store.get(message.id)) throw new Error(`Thread ${message.id} already exists`);
+    const now = new Date().toISOString();
+    const sibling = this.#pinsFor(providerThreadId)[0];
+    const thread: Thread = {
+      id: message.id,
+      title: titleFor(message.prompt, message.context),
+      pageUrl: message.pageUrl,
+      anchor: message.anchor,
+      context: message.context,
+      status: "working",
+      resolved: false,
+      // Show the conversation so far; the provider snapshot replaces it when it arrives.
+      messages: [...(sibling?.messages ?? []), localMessage(message.prompt, now)],
+      provider: {
+        id: provider.id,
+        threadId: providerThreadId,
+        url: provider.threadUrl(providerThreadId),
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.upsert(thread);
+    this.#broadcastThread(thread, true);
+    this.#watch(providerThreadId, true);
+
+    try {
+      await provider.sendMessage({
+        providerThreadId,
+        text: renderPrompt({
+          prompt: message.prompt,
+          pageUrl: message.pageUrl,
+          context: message.context,
+          hasScreenshot: message.attachments.length > 0,
+        }),
+        attachments: message.attachments,
+      });
+      this.#options.log?.(`Pin "${thread.title}" → existing ${provider.label} thread`);
+    } catch (error) {
+      this.#update(thread.id, (current) => ({
+        ...current,
+        status: "error",
+        statusDetail: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  /** Track an existing provider thread without an element, e.g. to continue it from the dock. */
+  #open(message: Extract<ClientMessage, { type: "thread.open" }>): void {
+    const { provider, store } = this.#options;
+    const existing = this.#pinsFor(message.providerThreadId).find((thread) => !thread.anchor);
+    if (existing) {
+      this.#broadcastThread(existing, true);
+      return;
+    }
+    const sibling = this.#pinsFor(message.providerThreadId)[0];
+    const now = new Date().toISOString();
+    const thread: Thread = {
+      id: message.id,
+      title: message.title ?? sibling?.title ?? "Thread",
+      status: sibling?.status ?? "idle",
+      resolved: false,
+      messages: sibling?.messages ?? [],
+      provider: {
+        id: provider.id,
+        threadId: message.providerThreadId,
+        url: provider.threadUrl(message.providerThreadId),
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.upsert(thread);
+    this.#broadcastThread(thread, true);
+    this.#watch(message.providerThreadId, true);
   }
 
   async #reply(message: Extract<ClientMessage, { type: "thread.reply" }>): Promise<void> {
@@ -185,20 +275,44 @@ export class Bridge {
 
   /* ------------------------------ provider sink ------------------------------ */
 
-  #watch(threadId: string, providerThreadId: string): void {
-    this.#unwatch.get(threadId)?.();
+  /**
+   * Subscribe once per provider thread and fan updates out to every bound pin.
+   * `replay` re-subscribes an existing watch so a newly bound pin receives the
+   * provider's snapshot too.
+   */
+  #watch(providerThreadId: string, replay = false): void {
+    if (this.#watches.has(providerThreadId) && !replay) return;
+    this.#watches.get(providerThreadId)?.();
+    const each = (change: (thread: Thread) => Thread) => {
+      for (const thread of this.#pinsFor(providerThreadId)) this.#update(thread.id, change);
+    };
     const unwatch = this.#options.provider.watch(providerThreadId, {
-      message: (message) => this.#update(threadId, (thread) => mergeMessage(thread, message)),
-      status: (status, statusDetail) =>
-        this.#update(threadId, (thread) => ({ ...thread, status, statusDetail })),
+      message: (message) => each((thread) => mergeMessage(thread, message)),
+      status: (status, statusDetail) => each((thread) => ({ ...thread, status, statusDetail })),
       gone: () =>
-        this.#update(threadId, (thread) => ({
+        each((thread) => ({
           ...thread,
           status: "error",
           statusDetail: `Thread no longer exists in ${this.#options.provider.label}`,
         })),
     });
-    this.#unwatch.set(threadId, unwatch);
+    this.#watches.set(providerThreadId, unwatch);
+  }
+
+  #release(providerThreadId: string): void {
+    if (this.#pinsFor(providerThreadId).length > 0) return;
+    this.#watches.get(providerThreadId)?.();
+    this.#watches.delete(providerThreadId);
+  }
+
+  #pinsFor(providerThreadId: string): Thread[] {
+    return this.#options.store
+      .list()
+      .filter(
+        (thread) =>
+          thread.provider.id === this.#options.provider.id &&
+          thread.provider.threadId === providerThreadId,
+      );
   }
 
   /* --------------------------------- helpers --------------------------------- */

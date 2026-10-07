@@ -1,3 +1,4 @@
+import { threads } from "./connection.ts";
 import { captureContext, quickLabel } from "./context.ts";
 import {
   currentPage,
@@ -48,7 +49,9 @@ export function installPicker(host: HTMLElement): () => void {
   const block = (event: Event) => {
     // Clicking the page dismisses an open pin (the page still gets the click).
     if (mode.value === "idle" && event.type === "pointerdown" && !isOurs(event)) {
-      openThreadId.value = null;
+      // Docked (unpinned) threads stay open while you use the page.
+      const open = openThreadId.value ? threads.value.get(openThreadId.value) : undefined;
+      if (open?.anchor) openThreadId.value = null;
       return;
     }
     if (mode.value !== "picking" || isOurs(event)) return;

@@ -6,7 +6,7 @@ import { resolveAnchor } from "./position.ts";
 /** Stable pin numbers: oldest pin is #1, across all pages. */
 export const pinNumbers = computed(() => {
   const numbers = new Map<string, number>();
-  const ordered = [...sortedThreads.value].reverse();
+  const ordered = [...sortedThreads.value].reverse().filter((thread) => thread.anchor);
   for (const [index, thread] of ordered.entries()) numbers.set(thread.id, index + 1);
   return numbers;
 });
@@ -26,6 +26,7 @@ export function Pins() {
 }
 
 function Pin({ thread }: { thread: Thread }) {
+  if (!thread.anchor) return null;
   const point = resolveAnchor(thread.anchor);
   if (!point) return null;
   const open = openThreadId.value === thread.id;

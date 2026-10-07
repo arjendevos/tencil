@@ -144,7 +144,34 @@ kbd {
 
 .composer { padding: 10px; display: grid; gap: 8px; }
 .composer-target { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 2px; }
-.composer-provider { color: var(--n-600); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-provider {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0; margin-left: auto;
+  padding: 2px 6px; border-radius: 7px; color: var(--n-600); font-size: 12px;
+}
+.composer-provider-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-provider svg { flex: none; transition: transform 150ms var(--ease-out); }
+.composer-provider.open svg { transform: rotate(180deg); }
+.target-menu {
+  display: grid; max-height: 220px; overflow-y: auto; padding: 4px;
+  background: var(--surface); border-radius: 12px; box-shadow: 0 0 0 1px var(--n-200);
+  transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+  transform-origin: top right;
+  @starting-style { opacity: 0; transform: scale(0.97); }
+}
+.target-option {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0;
+  padding: 7px 8px; border-radius: 8px; text-align: left; font-size: 12px;
+}
+.target-option.selected { background: var(--n-100); }
+.target-option-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.target-option-meta { color: var(--n-500); flex: none; }
+.target-empty { margin: 0; padding: 7px 8px; color: var(--n-500); font-size: 12px; }
+.thread-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; background: var(--n-400); }
+.inbox-item .thread-dot { margin: 7px 4px 0 2px; }
+.thread-dot-working, .thread-dot-starting { background: var(--live); animation: live 1.6s ease-in-out infinite; }
+.thread-dot-waiting { background: var(--warn); }
+.thread-dot-error { background: var(--error); }
+.thread-dot-idle { background: var(--done); }
 .hint { margin: 0; padding: 0 2px; color: var(--warn); font-size: 12px; }
 
 .chip {
@@ -206,6 +233,8 @@ kbd {
 .thread-number { color: var(--n-600); font-weight: 500; font-size: 12px; }
 .thread-source { color: var(--n-600); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thread-tools { display: flex; gap: 2px; flex: none; }
+.thread-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 2px; }
+.thread-docked { max-height: calc(100vh - 100px); }
 .icon-button {
   width: 26px; height: 26px; border-radius: 7px;
   display: grid; place-items: center; color: var(--n-600);
@@ -298,7 +327,7 @@ kbd {
 .root:has(.dock-top-right) .inbox { top: 76px; bottom: 16px; }
 .inbox-header { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--n-200); }
 .inbox-header strong { font-size: 14px; font-weight: 500; }
-.segmented { display: flex; margin-left: auto; background: var(--n-100); border-radius: 9px; padding: 2px; }
+.segmented { display: flex; margin-right: auto; background: var(--n-100); border-radius: 9px; padding: 2px; }
 .segmented button { padding: 3px 10px; border-radius: 7px; color: var(--n-600); font-size: 12px; }
 .segmented .active { background: var(--surface); color: var(--n-950); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 .inbox-filter { display: flex; align-items: center; gap: 6px; padding: 10px 16px 6px; color: var(--n-600); font-size: 12px; cursor: pointer; }
@@ -394,10 +423,12 @@ kbd {
 }
 
 /* --------------------------- feedback & motion --------------------------- */
-.tool, .icon-button, .toggle, .stop, .segmented button, .inbox-item {
+.tool, .icon-button, .toggle, .stop, .segmented button, .inbox-item, .composer-provider, .target-option {
   transition: transform 160ms var(--ease-out), background-color 150ms ease, color 150ms ease;
 }
-.tool:active, .icon-button:active, .toggle:active, .stop:active, .segmented button:active { transform: var(--press); }
+.tool:active, .icon-button:active, .toggle:active, .stop:active, .segmented button:active,
+.composer-provider:active { transform: var(--press); }
+.target-option:active { transform: scale(0.99); }
 .inbox-item:active { transform: scale(0.99); }
 
 @media (hover: hover) and (pointer: fine) {
@@ -407,6 +438,7 @@ kbd {
   .divider:hover::before { background: rgba(255, 255, 255, 0.35); }
   .toggle:hover, .stop:hover { background: var(--n-100); }
   .inbox-item:hover { background: var(--n-100); }
+  .composer-provider:hover, .target-option:hover { background: var(--n-100); color: var(--n-950); }
   .md a:hover { opacity: 0.8; }
 }
 

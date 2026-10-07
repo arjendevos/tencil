@@ -25,13 +25,18 @@ export const ThreadMessage = z.object({
 });
 export type ThreadMessage = z.infer<typeof ThreadMessage>;
 
-/** A pin on a page, backed by one provider thread. Owned and persisted by the bridge. */
+/**
+ * A conversation Pinprompt tracks, backed by one provider thread. Owned and
+ * persisted by the bridge. Pinned threads sit on an element of a page;
+ * threads opened from the provider's list have no anchor and live in the dock.
+ * Several pins may continue the same provider thread.
+ */
 export const Thread = z.object({
   id: z.string(),
   title: z.string(),
-  pageUrl: z.string(),
-  anchor: Anchor,
-  context: ElementContext,
+  pageUrl: z.string().optional(),
+  anchor: Anchor.optional(),
+  context: ElementContext.optional(),
   status: ThreadStatus,
   statusDetail: z.string().optional(),
   resolved: z.boolean().default(false),
@@ -46,3 +51,13 @@ export const Thread = z.object({
   updatedAt: z.string(),
 });
 export type Thread = z.infer<typeof Thread>;
+
+/** A thread as listed by the provider (e.g. every T3 Code thread in the project). */
+export const ProviderThreadSummary = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum(["working", "waiting", "idle", "error"]),
+  updatedAt: z.string(),
+  url: z.string().optional(),
+});
+export type ProviderThreadSummary = z.infer<typeof ProviderThreadSummary>;

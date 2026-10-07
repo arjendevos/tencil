@@ -1,14 +1,28 @@
-import type { ImageAttachment, Thread } from "@pinprompt/protocol";
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
-import { provider, send, upsertLocal } from "../connection.ts";
+import type { ImageAttachment, ProviderThreadSummary, Thread } from "@pinprompt/protocol";
+import { signal } from "@preact/signals";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import {
+  provider,
+  providerThreads,
+  refreshProviderThreads,
+  send,
+  upsertLocal,
+} from "../connection.ts";
 import { getHost } from "../host.ts";
 import { captureElement } from "../screenshot.ts";
 import { draft, layoutTick, openThreadId } from "../state.ts";
-import { CameraIcon, CodeIcon } from "./icons.tsx";
+import { timeAgo } from "./Inbox.tsx";
+import { CameraIcon, ChevronIcon, CodeIcon } from "./icons.tsx";
 import { PromptInput } from "./PromptInput.tsx";
 import { popoverPosition, resolveAnchor } from "./position.ts";
 
 const WIDTH = 340;
+
+/**
+ * Where new pins go: a fresh thread (null) or an existing one. Sticky across
+ * pins so a review session can keep feeding the same conversation.
+ */
+const composerTarget = signal<ProviderThreadSummary | null>(null);
 
 export function Composer() {
   layoutTick.value;
@@ -17,6 +31,11 @@ export function Composer() {
   const [height, setHeight] = useState(140);
   const [withScreenshot, setWithScreenshot] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+
+  useEffect(() => {
+    if (pending) refreshProviderThreads();
+  }, [pending]);
 
   useLayoutEffect(() => {
     if (ref.current) setHeight(ref.current.offsetHeight);
@@ -28,6 +47,7 @@ export function Composer() {
   const { left, top, origin } = popoverPosition(point, { width: WIDTH, height });
   const target = provider.value;
   const ready = target?.state === "ready";
+  const existing = composerTarget.value;
 
   const submit = async (prompt: string) => {
     setBusy(true);
@@ -48,6 +68,7 @@ export function Composer() {
         anchor,
         context,
         attachments,
+        ...(existing ? { providerThreadId: existing.id } : {}),
       });
       if (!ok) return;
       const now = new Date().toISOString();
@@ -57,12 +78,15 @@ export function Composer() {
         pageUrl: location.href,
         anchor,
         context,
-        status: "starting",
+        status: existing ? "working" : "starting",
         resolved: false,
         messages: [
           { id: `local:${id}`, role: "user", text: prompt, streaming: false, createdAt: now },
         ],
-        provider: { id: target?.id ?? "unknown" },
+        provider: {
+          id: target?.id ?? "unknown",
+          ...(existing ? { threadId: existing.id, url: existing.url } : {}),
+        },
         createdAt: now,
         updatedAt: now,
       };
@@ -91,14 +115,35 @@ export function Composer() {
           {pending.label}
         </span>
         {target && (
-          <span class="composer-provider">
-            → {target.label}
-            {target.target ? ` · ${target.target}` : ""}
-          </span>
+          <button
+            type="button"
+            class={`composer-provider${picking ? " open" : ""}`}
+            onClick={() => setPicking(!picking)}
+            title="Send to a new thread or continue an existing one"
+          >
+            <span class="composer-provider-label">
+              → {existing ? existing.title : `New ${target.label} thread`}
+            </span>
+            <ChevronIcon />
+          </button>
         )}
       </div>
+      {picking && (
+        <TargetMenu
+          onPick={(summary) => {
+            composerTarget.value = summary;
+            setPicking(false);
+          }}
+        />
+      )}
       <PromptInput
-        placeholder={ready ? "What should change here?" : "Waiting for the agent connection…"}
+        placeholder={
+          !ready
+            ? "Waiting for the agent connection…"
+            : existing
+              ? "Continue the thread with this element…"
+              : "What should change here?"
+        }
         autoFocus
         busy={busy}
         disabled={!ready}
@@ -118,6 +163,39 @@ export function Composer() {
         </button>
       </PromptInput>
       {!ready && target?.detail && <p class="hint">{target.detail}</p>}
+    </div>
+  );
+}
+
+function TargetMenu({ onPick }: { onPick: (summary: ProviderThreadSummary | null) => void }) {
+  const list = providerThreads.value;
+  const current = composerTarget.value?.id ?? null;
+  return (
+    <div class="target-menu" role="listbox">
+      <button
+        type="button"
+        role="option"
+        aria-selected={current === null}
+        class={`target-option${current === null ? " selected" : ""}`}
+        onClick={() => onPick(null)}
+      >
+        <span class="target-option-title">New thread</span>
+      </button>
+      {list === null && <p class="target-empty">Loading threads…</p>}
+      {list?.map((summary) => (
+        <button
+          key={summary.id}
+          type="button"
+          role="option"
+          aria-selected={current === summary.id}
+          class={`target-option${current === summary.id ? " selected" : ""}`}
+          onClick={() => onPick(summary)}
+        >
+          <span class={`thread-dot thread-dot-${summary.status}`} />
+          <span class="target-option-title">{summary.title}</span>
+          <span class="target-option-meta">{timeAgo(summary.updatedAt)}</span>
+        </button>
+      ))}
     </div>
   );
 }

@@ -1,4 +1,10 @@
-import type { ClientMessageInput, ProviderInfo, ServerMessage, Thread } from "@pinprompt/protocol";
+import type {
+  ClientMessageInput,
+  ProviderInfo,
+  ProviderThreadSummary,
+  ServerMessage,
+  Thread,
+} from "@pinprompt/protocol";
 import { batch, signal } from "@preact/signals";
 
 export type BridgeState = "connecting" | "open" | "closed";
@@ -7,6 +13,8 @@ export const bridgeState = signal<BridgeState>("connecting");
 export const provider = signal<ProviderInfo | null>(null);
 export const project = signal<{ name: string; root: string } | null>(null);
 export const threads = signal<ReadonlyMap<string, Thread>>(new Map());
+/** The provider's own threads for this project (null until first fetched). */
+export const providerThreads = signal<ProviderThreadSummary[] | null>(null);
 export const lastError = signal<{ message: string; threadId?: string; at: number } | null>(null);
 
 let socket: WebSocket | undefined;
@@ -82,8 +90,32 @@ function handle(message: ServerMessage): void {
       threads.value = next;
       return;
     }
+    case "provider.threads":
+      providerThreads.value = message.threads;
+      return;
     case "error":
       lastError.value = { message: message.message, threadId: message.threadId, at: Date.now() };
       return;
   }
+}
+
+export function refreshProviderThreads(): void {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: "provider.threads" }));
+  }
+}
+
+/** Open a provider thread in the dock, reusing an existing unpinned record. */
+export function openProviderThread(summary: ProviderThreadSummary): string | null {
+  for (const thread of threads.value.values()) {
+    if (thread.provider.threadId === summary.id && !thread.anchor) return thread.id;
+  }
+  const id = crypto.randomUUID();
+  const sent = send({
+    type: "thread.open",
+    id,
+    providerThreadId: summary.id,
+    title: summary.title,
+  });
+  return sent ? id : null;
 }

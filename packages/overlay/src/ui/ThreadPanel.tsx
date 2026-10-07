@@ -1,7 +1,7 @@
 import type { Thread, ThreadMessage } from "@pinprompt/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { provider, send, threads } from "../connection.ts";
-import { layoutTick, openThreadId } from "../state.ts";
+import { inboxOpen, layoutTick, openThreadId } from "../state.ts";
 import {
   CheckIcon,
   CloseIcon,
@@ -30,16 +30,21 @@ export function ThreadPanel() {
   });
 
   if (!thread) return null;
-  const point = resolveAnchor(thread.anchor) ?? {
-    x: window.innerWidth / 2 - WIDTH / 2,
-    y: window.innerHeight / 3,
-  };
-  const { left, top, origin } = popoverPosition(point, { width: WIDTH, height });
+  // Pinned threads float beside their pin; unpinned ones dock to the right edge.
+  const point = thread.anchor ? resolveAnchor(thread.anchor) : null;
+  const placement = point
+    ? popoverPosition(point, { width: WIDTH, height })
+    : {
+        left: window.innerWidth - WIDTH - (inboxOpen.value ? 372 : 16),
+        top: 16,
+        origin: "top right",
+      };
+  const { left, top, origin } = placement;
 
   return (
     <div
       ref={ref}
-      class="popover thread"
+      class={`popover thread${point ? "" : " thread-docked"}`}
       style={{
         left: `${left}px`,
         top: `${top}px`,
@@ -65,20 +70,29 @@ export function ThreadPanel() {
 }
 
 function Header({ thread }: { thread: Thread }) {
-  const component = thread.context.components[0];
+  const context = thread.context;
+  const component = context?.components[0];
   const source = component?.source;
   return (
     <div class="thread-header">
       <div class="thread-heading">
-        <span class="thread-number">#{pinNumbers.value.get(thread.id)}</span>
-        <span class="chip" title={thread.context.selector}>
-          <CodeIcon />
-          {component?.name ?? `<${thread.context.tagName}>`}
-        </span>
-        {source && (
-          <span class="thread-source" title={source.file}>
-            {source.file.split("/").pop()}
-            {source.line ? `:${source.line}` : ""}
+        {context ? (
+          <>
+            <span class="thread-number">#{pinNumbers.value.get(thread.id)}</span>
+            <span class="chip" title={context.selector}>
+              <CodeIcon />
+              {component?.name ?? `<${context.tagName}>`}
+            </span>
+            {source && (
+              <span class="thread-source" title={source.file}>
+                {source.file.split("/").pop()}
+                {source.line ? `:${source.line}` : ""}
+              </span>
+            )}
+          </>
+        ) : (
+          <span class="thread-title" title={thread.title}>
+            {thread.title}
           </span>
         )}
       </div>

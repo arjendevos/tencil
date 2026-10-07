@@ -6,6 +6,7 @@ import type {
   CreateThreadInput,
   Provider,
   ProviderInfo,
+  ProviderThreadSummary,
   SendMessageInput,
   ThreadSink,
 } from "@pinprompt/protocol";
@@ -58,7 +59,22 @@ interface Watcher {
   cancel?: () => void;
 }
 
+/** Loose view of a shell thread; V1 and V2 servers both send these fields. */
+interface WireShellThread {
+  id: string;
+  projectId: string;
+  title: string;
+  updatedAt: string;
+  archivedAt?: string | null;
+  session?: { status?: string } | null;
+  latestTurn?: { state?: string } | null;
+  hasPendingApprovals?: boolean;
+  hasPendingUserInput?: boolean;
+  status?: string;
+}
+
 interface Connection {
+  token: string;
   socket: RpcSocket;
   protocol: ProtocolAdapter;
   environmentId: string;
@@ -103,6 +119,28 @@ export class T3CodeProvider implements Provider {
     return () => this.#infoListeners.delete(listener);
   }
 
+  async listThreads(): Promise<ProviderThreadSummary[]> {
+    const connection = this.#requireConnection();
+    const shell = await this.#fetchJson<{ threads: WireShellThread[] }>(
+      "/api/orchestration/shell",
+      connection.token,
+    );
+    return shell.threads
+      .filter((thread) => thread.projectId === connection.project.id && !thread.archivedAt)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((thread) => ({
+        id: thread.id,
+        title: thread.title,
+        status: summaryStatus(thread),
+        updatedAt: thread.updatedAt,
+        url: this.#threadUrl(connection, thread.id),
+      }));
+  }
+
+  threadUrl(providerThreadId: string): string | undefined {
+    return this.#connection ? this.#threadUrl(this.#connection, providerThreadId) : undefined;
+  }
+
   async createThread(input: CreateThreadInput): Promise<CreatedThread> {
     const connection = this.#requireConnection();
     const threadId = randomUUID();
@@ -116,10 +154,7 @@ export class T3CodeProvider implements Provider {
       runtimeMode: this.#runtimeMode(),
       interactionMode: this.#options.interactionMode ?? "default",
     });
-    return {
-      providerThreadId: threadId,
-      url: `${this.#baseUrl}/${connection.environmentId}/${threadId}`,
-    };
+    return { providerThreadId: threadId, url: this.#threadUrl(connection, threadId) };
   }
 
   async sendMessage(input: SendMessageInput): Promise<void> {
@@ -230,6 +265,7 @@ export class T3CodeProvider implements Provider {
         this.#scheduleReconnect();
       });
       return {
+        token,
         socket,
         protocol,
         environmentId: environment.environmentId,
@@ -333,6 +369,10 @@ export class T3CodeProvider implements Provider {
 
   /* --------------------------------- helpers --------------------------------- */
 
+  #threadUrl(connection: Connection, threadId: string): string {
+    return `${this.#baseUrl}/${connection.environmentId}/${threadId}`;
+  }
+
   #runtimeMode(): RuntimeMode {
     return this.#options.runtimeMode ?? "full-access";
   }
@@ -377,6 +417,15 @@ export class T3CodeProvider implements Provider {
   #log(message: string): void {
     this.#options.log?.(message);
   }
+}
+
+function summaryStatus(thread: WireShellThread): ProviderThreadSummary["status"] {
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "waiting";
+  const session = thread.session?.status ?? thread.status;
+  if (session === "running" || session === "starting") return "working";
+  if (thread.latestTurn?.state === "running") return "working";
+  if (session === "error" || thread.latestTurn?.state === "error") return "error";
+  return "idle";
 }
 
 function errorMessage(error: unknown): string {

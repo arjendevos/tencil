@@ -42,7 +42,9 @@ export const sortedThreads = computed(() =>
 
 export const pageThreads = computed(() =>
   sortedThreads.value
-    .filter((thread) => pageKey(thread.pageUrl) === currentPage.value)
+    .filter(
+      (thread) => thread.anchor && thread.pageUrl && pageKey(thread.pageUrl) === currentPage.value,
+    )
     .filter((thread) => showResolved.value || !thread.resolved)
     .reverse(),
 );

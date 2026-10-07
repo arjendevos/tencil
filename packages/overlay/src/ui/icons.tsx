@@ -103,3 +103,9 @@ export const CodeIcon = () => (
     <path d="m16 18 6-6-6-6M8 6l-6 6 6 6" />
   </Icon>
 );
+
+export const ChevronIcon = () => (
+  <Icon size={12}>
+    <path d="m6 9 6 6 6-6" />
+  </Icon>
+);

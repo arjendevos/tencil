@@ -1,5 +1,12 @@
-import type { Thread } from "@pinprompt/protocol";
-import { useState } from "preact/hooks";
+import type { ProviderThreadSummary, Thread } from "@pinprompt/protocol";
+import { useEffect, useState } from "preact/hooks";
+import {
+  openProviderThread,
+  provider,
+  providerThreads,
+  refreshProviderThreads,
+  threads,
+} from "../connection.ts";
 import {
   currentPage,
   inboxOpen,
@@ -14,18 +21,21 @@ import { pinNumbers, pinVariant } from "./Pins.tsx";
 /** Survives the full reload when jumping to a pin on another page. */
 export const PENDING_OPEN_KEY = "pinprompt:open";
 
-export function Inbox() {
-  const [scope, setScope] = useState<"page" | "all">("page");
-  if (!inboxOpen.value) return null;
+type Scope = "page" | "all" | "provider";
 
-  const list = sortedThreads.value
-    .filter((thread) => showResolved.value || !thread.resolved)
-    .filter((thread) => scope === "all" || pageKey(thread.pageUrl) === currentPage.value);
+export function Inbox() {
+  const [scope, setScope] = useState<Scope>("page");
+  const label = provider.value?.label ?? "Agent";
+
+  useEffect(() => {
+    if (inboxOpen.value && scope === "provider") refreshProviderThreads();
+  }, [scope, inboxOpen.value]);
+
+  if (!inboxOpen.value) return null;
 
   return (
     <aside class="inbox">
       <header class="inbox-header">
-        <strong>Pins</strong>
         <div class="segmented">
           <button
             type="button"
@@ -39,7 +49,14 @@ export function Inbox() {
             class={scope === "all" ? "active" : ""}
             onClick={() => setScope("all")}
           >
-            All
+            All pins
+          </button>
+          <button
+            type="button"
+            class={scope === "provider" ? "active" : ""}
+            onClick={() => setScope("provider")}
+          >
+            {label}
           </button>
         </div>
         <button
@@ -53,6 +70,21 @@ export function Inbox() {
           <CloseIcon />
         </button>
       </header>
+      {scope === "provider" ? <ProviderList label={label} /> : <PinList scope={scope} />}
+    </aside>
+  );
+}
+
+function PinList({ scope }: { scope: "page" | "all" }) {
+  const list = sortedThreads.value
+    .filter((thread) => showResolved.value || !thread.resolved)
+    .filter(
+      (thread) =>
+        scope === "all" ||
+        (thread.anchor && thread.pageUrl && pageKey(thread.pageUrl) === currentPage.value),
+    );
+  return (
+    <>
       <label class="inbox-filter">
         <input
           type="checkbox"
@@ -72,17 +104,58 @@ export function Inbox() {
           list.map((thread) => <InboxItem key={thread.id} thread={thread} />)
         )}
       </div>
-    </aside>
+    </>
+  );
+}
+
+/** Every thread the provider has for this project, so existing work can continue here. */
+function ProviderList({ label }: { label: string }) {
+  const list = providerThreads.value;
+  if (!list) {
+    return <p class="empty">Loading {label} threads…</p>;
+  }
+  if (list.length === 0) {
+    return <p class="empty">No {label} threads in this project yet.</p>;
+  }
+  return (
+    <div class="inbox-list inbox-list-provider">
+      {list.map((summary) => (
+        <ProviderItem key={summary.id} summary={summary} />
+      ))}
+    </div>
+  );
+}
+
+function ProviderItem({ summary }: { summary: ProviderThreadSummary }) {
+  const pins = [...threads.value.values()].filter(
+    (thread) => thread.provider.threadId === summary.id && thread.anchor,
+  ).length;
+  const open = () => {
+    const id = openProviderThread(summary);
+    if (id) openThreadId.value = id;
+  };
+  return (
+    <button type="button" class="inbox-item" onClick={open}>
+      <span class={`thread-dot thread-dot-${summary.status}`} />
+      <span class="inbox-item-body">
+        <span class="inbox-item-title">{summary.title}</span>
+        <span class="inbox-item-meta">
+          {summaryLabel(summary.status)} · {timeAgo(summary.updatedAt)}
+          {pins > 0 && ` · ${pins} pin${pins === 1 ? "" : "s"}`}
+        </span>
+      </span>
+    </button>
   );
 }
 
 function InboxItem({ thread }: { thread: Thread }) {
-  const samePage = pageKey(thread.pageUrl) === currentPage.value;
+  const pinned = Boolean(thread.anchor && thread.pageUrl);
+  const samePage = !pinned || pageKey(thread.pageUrl!) === currentPage.value;
   const last = [...thread.messages].reverse().find((message) => message.role === "assistant");
   const open = () => {
     if (!samePage) {
       sessionStorage.setItem(PENDING_OPEN_KEY, thread.id);
-      location.href = thread.pageUrl;
+      location.href = thread.pageUrl!;
       return;
     }
     openThreadId.value = thread.id;
@@ -94,13 +167,18 @@ function InboxItem({ thread }: { thread: Thread }) {
       class={`inbox-item${openThreadId.value === thread.id ? " active" : ""}`}
       onClick={open}
     >
-      <span class={`pin pin-static pin-${pinVariant(thread)}`}>
-        <span class="pin-body">{pinNumbers.value.get(thread.id)}</span>
-      </span>
+      {pinned ? (
+        <span class={`pin pin-static pin-${pinVariant(thread)}`}>
+          <span class="pin-body">{pinNumbers.value.get(thread.id)}</span>
+        </span>
+      ) : (
+        <span class={`thread-dot thread-dot-${thread.status}`} />
+      )}
       <span class="inbox-item-body">
         <span class="inbox-item-title">{thread.title}</span>
         <span class="inbox-item-meta">
-          {!samePage && <span>{new URL(thread.pageUrl).pathname} · </span>}
+          {!pinned && <span>Not pinned · </span>}
+          {pinned && !samePage && <span>{new URL(thread.pageUrl!).pathname} · </span>}
           {statusLabel(thread)} · {timeAgo(thread.updatedAt)}
         </span>
         {last && <span class="inbox-item-preview">{last.text.slice(0, 140)}</span>}
@@ -110,6 +188,7 @@ function InboxItem({ thread }: { thread: Thread }) {
 }
 
 export function revealAnchor(thread: Thread): void {
+  if (!thread.anchor) return;
   try {
     document
       .querySelector(thread.anchor.selector)
@@ -135,7 +214,20 @@ function statusLabel(thread: Thread): string {
   }
 }
 
-function timeAgo(iso: string): string {
+export function summaryLabel(status: ProviderThreadSummary["status"]): string {
+  switch (status) {
+    case "working":
+      return "Working";
+    case "waiting":
+      return "Needs input";
+    case "error":
+      return "Error";
+    default:
+      return "Idle";
+  }
+}
+
+export function timeAgo(iso: string): string {
   const seconds = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
   if (seconds < 60) return "just now";
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;

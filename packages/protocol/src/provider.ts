@@ -1,6 +1,6 @@
 import type { ImageAttachment } from "./context.ts";
 import type { ProviderInfo } from "./messages.ts";
-import type { MessageRole, ThreadStatus } from "./thread.ts";
+import type { MessageRole, ProviderThreadSummary, ThreadStatus } from "./thread.ts";
 
 /**
  * A provider is the agent backend a pin is delegated to (T3 Code, Claude Code,
@@ -19,6 +19,10 @@ export interface Provider {
   info(): ProviderInfo;
   onInfoChange(listener: (info: ProviderInfo) => void): () => void;
 
+  /** Threads that already exist for this project, newest first. */
+  listThreads(): Promise<ProviderThreadSummary[]>;
+  /** Deep link into the provider UI for a thread, when it has one. */
+  threadUrl(providerThreadId: string): string | undefined;
   createThread(input: CreateThreadInput): Promise<CreatedThread>;
   sendMessage(input: SendMessageInput): Promise<void>;
   interrupt(providerThreadId: string): Promise<void>;

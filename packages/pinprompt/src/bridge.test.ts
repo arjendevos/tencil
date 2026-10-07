@@ -64,7 +64,7 @@ describe("mergeMessage", () => {
       role: "user",
       text: renderPrompt({
         prompt: "Make it red",
-        pageUrl: thread.pageUrl,
+        pageUrl: "http://localhost:3000/",
         context,
         hasScreenshot: false,
       }),
