@@ -1,0 +1,55 @@
+{
+  "name": "pinprompt",
+  "version": "0.0.1",
+  "description": "Pin a prompt on any element of your running app and let your coding agent fix it.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "agent",
+    "ai",
+    "t3code",
+    "claude-code",
+    "devtools",
+    "react",
+    "review",
+    "comments"
+  ],
+  "bin": {
+    "pinprompt": "./dist/cli.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.mts",
+      "default": "./dist/vite.mjs"
+    },
+    "./overlay.js": "./dist/overlay.global.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown && cp ../overlay/dist/pinprompt.global.js dist/overlay.global.js",
+    "dev": "node --watch --experimental-strip-types src/cli.ts --root ../../apps/playground",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "picocolors": "^1.1.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@pinprompt/overlay": "workspace:*",
+    "@pinprompt/protocol": "workspace:*",
+    "@pinprompt/provider-t3code": "workspace:*",
+    "@types/ws": "^8.18.2",
+    "tsdown": "^0.23.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
