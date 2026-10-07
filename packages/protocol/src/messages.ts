@@ -1,0 +1,62 @@
+import { z } from "zod";
+import { Anchor, ElementContext, ImageAttachment } from "./context.ts";
+import type { Thread } from "./thread.ts";
+
+export const PROTOCOL_VERSION = 1;
+
+/* ----------------------------- overlay → bridge ----------------------------- */
+
+export const ClientMessage = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("hello"),
+    protocol: z.literal(PROTOCOL_VERSION),
+    pageUrl: z.string(),
+  }),
+  z.object({
+    type: z.literal("thread.create"),
+    /** Client-generated id so the overlay can render the pin optimistically. */
+    id: z.string().min(1).max(64),
+    pageUrl: z.string(),
+    prompt: z.string().min(1),
+    anchor: Anchor,
+    context: ElementContext,
+    attachments: z.array(ImageAttachment).max(4).default([]),
+  }),
+  z.object({
+    type: z.literal("thread.reply"),
+    threadId: z.string(),
+    text: z.string().min(1),
+    attachments: z.array(ImageAttachment).max(4).default([]),
+  }),
+  z.object({ type: z.literal("thread.interrupt"), threadId: z.string() }),
+  z.object({ type: z.literal("thread.resolve"), threadId: z.string(), resolved: z.boolean() }),
+  z.object({ type: z.literal("thread.delete"), threadId: z.string() }),
+]);
+export type ClientMessage = z.infer<typeof ClientMessage>;
+export type ClientMessageInput = z.input<typeof ClientMessage>;
+
+/* ----------------------------- bridge → overlay ----------------------------- */
+
+export const ProviderInfo = z.object({
+  id: z.string(),
+  label: z.string(),
+  state: z.enum(["connecting", "ready", "unauthorized", "unavailable"]),
+  detail: z.string().optional(),
+  /** Human label for where threads go, e.g. the T3 Code project name. */
+  target: z.string().optional(),
+});
+export type ProviderInfo = z.infer<typeof ProviderInfo>;
+
+export type ServerMessage =
+  | {
+      type: "ready";
+      protocol: typeof PROTOCOL_VERSION;
+      version: string;
+      project: { name: string; root: string };
+      provider: ProviderInfo;
+      threads: Thread[];
+    }
+  | { type: "provider.status"; provider: ProviderInfo }
+  | { type: "thread.upsert"; thread: Thread }
+  | { type: "thread.removed"; threadId: string }
+  | { type: "error"; message: string; threadId?: string };
