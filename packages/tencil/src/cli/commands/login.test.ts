@@ -23,8 +23,9 @@ describe('tencil login', () => {
             if (url === `${CLOUD}/api/cli`) {
                 return Response.json({
                     clientId: 'cli-client',
-                    deviceCodeUrl: `${CLOUD}/oauth/device/code`,
-                    tokenUrl: `${CLOUD}/oauth/token`,
+                    // Another host than the one we asked: the codes still go to CLOUD.
+                    deviceCodeUrl: 'https://elsewhere.example/oauth/device/code',
+                    tokenUrl: 'https://elsewhere.example/oauth/token',
                     scope: 'cli',
                 });
             }

@@ -47,7 +47,18 @@ export async function fetchCliClient(
         headers: { Accept: 'application/json' },
     });
     if (!response.ok) throw new Error(`Tencil Cloud at ${url} answered ${response.status}`);
-    return CliClient.parse(await response.json());
+    const client = CliClient.parse(await response.json());
+    // Codes and tokens only ever go to the Tencil Cloud this machine was pointed at,
+    // whatever host it names (behind a proxy or a tunnel it may name its public one).
+    const here = (endpoint: string) => {
+        const { pathname, search } = new URL(endpoint);
+        return new URL(`${pathname}${search}`, url).toString();
+    };
+    return {
+        ...client,
+        deviceCodeUrl: here(client.deviceCodeUrl),
+        tokenUrl: here(client.tokenUrl),
+    };
 }
 
 export function parseTokenResponse(body: unknown): TokenResponse {
