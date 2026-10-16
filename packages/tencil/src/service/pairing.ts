@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { loadAgentSdk } from '@tencildev/provider-claude-code';
+import { EnsembleClient, ensembleUrl } from '@tencildev/provider-ensemble';
 import {
     CredentialStore,
     createLocalPairingCode,
@@ -17,6 +18,7 @@ export async function prepareProvider(
     log: (message: string) => void,
 ): Promise<void> {
     if (provider === 'claude-code') return prepareClaudeCode(log);
+    if (provider === 'ensemble') return checkEnsemble(log);
     return pairWithLocalT3(t3Url, log);
 }
 
@@ -62,4 +64,20 @@ async function prepareClaudeCode(log: (message: string) => void): Promise<void> 
     } catch (error) {
         log(`  ${pc.yellow('!')} ${error instanceof Error ? error.message : String(error)}`);
     }
+}
+
+/** Ensemble needs no pairing; just say whether its host is up. */
+async function checkEnsemble(log: (message: string) => void): Promise<void> {
+    const baseUrl = await ensembleUrl();
+    const running =
+        baseUrl !== undefined &&
+        (await new EnsembleClient({ baseUrl, requestTimeoutMs: 3_000 }).health().then(
+            () => true,
+            () => false,
+        ));
+    log(
+        running
+            ? `  ${pc.green('✓')} Ensemble is running. Pins go to the Ensemble project of each page.`
+            : `  ${pc.yellow('!')} Ensemble isn't running. Open the Ensemble app; Tencil connects once it is.`,
+    );
 }

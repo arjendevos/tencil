@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServerMessage, Thread } from '@tencildev/protocol';
 import { CredentialStore } from '@tencildev/provider-t3code';
-import { FakeRegistry, FakeT3Server, waitFor } from '@tencildev/testing';
+import { FakeEnsembleServer, FakeRegistry, FakeT3Server, waitFor } from '@tencildev/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { cliIn } from '../service/autostart.ts';
@@ -71,6 +71,8 @@ async function setup(
             autoPair: false,
             createPairingCode: async () => t3.issuePairingCode(),
         },
+        // An empty Ensemble folder, so this machine's Ensemble projects stay out of it.
+        ensemble: { dir: tmp('tencil-ensemble-') },
         resolveProject: async pageUrl => byPort[new URL(pageUrl).port],
         // No registry requests unless a test brings its own.
         updates: { check: false },
@@ -420,5 +422,45 @@ describe('updates', () => {
             error: 'npm install failed (1): E404 tencil@999.0.0',
         });
         expect((await httpGet(`${daemon.url}/health`)).status).toBe(200);
+    });
+});
+
+describe('Ensemble', () => {
+    it('sends pins on a page Ensemble serves for a thread to that thread', async () => {
+        const ensembleDir = tmp('tencil-ensemble-');
+        const repo = tmp('tencil-repo-');
+        const ensemble = await FakeEnsembleServer.start({
+            projects: [{ id: 'p1', name: 'acme', remote: repo }],
+        });
+        cleanup.push(() => ensemble.close());
+        writeFileSync(join(ensembleDir, 'listen-port'), String(ensemble.port));
+        const thread = ensemble.addThread({ projectId: 'p1', title: 'Landing' });
+        const workspace = join(ensembleDir, 'threads', thread.id, 'workspace');
+        mkdirSync(workspace, { recursive: true });
+
+        const { daemon } = await setup({
+            ensemble: { dir: ensembleDir },
+            resolveProject: async () => workspace,
+        });
+        const page = await connectPage(daemon, 'http://localhost:4174/');
+        await ready(page.received);
+        const hello = page.received.find(
+            (m): m is Extract<ServerMessage, { type: 'ready' }> => m.type === 'ready',
+        );
+        expect(hello?.settings.provider).toBe('ensemble');
+
+        page.send(pin('pin-1', 'Tighten the hero', 'http://localhost:4174/'));
+        const done = await waitFor(
+            () => {
+                const latest = page.latest('pin-1');
+                return latest?.messages.some(m => m.role === 'assistant') && latest;
+            },
+            { message: 'Ensemble reply on the pin' },
+        );
+        expect(done.provider).toMatchObject({ id: 'ensemble', threadId: thread.id });
+        expect(ensemble.callsOf('POST', 'threads')).toEqual([]);
+        expect(ensemble.callsOf('POST', `threads/${thread.id}/messages`)).toEqual([
+            expect.objectContaining({ text: expect.stringContaining('Tighten the hero') }),
+        ]);
     });
 });

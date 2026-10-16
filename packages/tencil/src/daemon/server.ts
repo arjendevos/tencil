@@ -12,6 +12,11 @@ import {
     type PermissionMode,
 } from '@tencildev/provider-claude-code';
 import {
+    EnsembleProvider,
+    listEnsembleProjects,
+    threadForPath,
+} from '@tencildev/provider-ensemble';
+import {
     type CredentialStore,
     listT3Projects,
     type ModelSelection,
@@ -48,6 +53,8 @@ export interface DaemonOptions {
      */
     provider?: ProviderName;
     claudeCode?: { model?: string; permissionMode?: PermissionMode };
+    /** The Ensemble host; found through the Ensemble app's files when unset. */
+    ensemble?: { url?: string; dir?: string };
     t3?: Pick<T3CodeProviderOptions, 'autoPair' | 'createPairingCode' | 'timeouts'> & {
         url?: string;
         token?: string;
@@ -120,6 +127,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
 
     const claudeCodeDir = join(dataDir, 'claude-code');
     const t3Url = options.t3?.url ?? process.env.TENCIL_T3_URL;
+    const ensembleOptions = options.ensemble ?? {};
     const createProvider =
         options.createProvider ??
         ((root: string, id: string): Provider => {
@@ -129,6 +137,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
                     ...options.claudeCode,
                     projectRoot: root,
                     installDir: claudeCodeDir,
+                    log: providerLog,
+                });
+            }
+            if (id === 'ensemble') {
+                return new EnsembleProvider({
+                    projectRoot: root,
+                    baseUrl: ensembleOptions.url,
+                    ensembleDir: ensembleOptions.dir,
                     log: providerLog,
                 });
             }
@@ -151,7 +167,12 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
                 const providers = new ProjectProviders({
                     choices: PROVIDER_OPTIONS,
                     // Read per project, so a new choice in setup applies without a restart.
-                    fallback: options.provider ?? (await machineProvider({ dataDir, t3Url })),
+                    // A dev server Ensemble runs for a thread belongs to that thread.
+                    fallback:
+                        options.provider ??
+                        (threadForPath(key, ensembleOptions.dir) !== undefined
+                            ? 'ensemble'
+                            : await machineProvider({ dataDir, t3Url })),
                     create: id => createProvider(key, id),
                     settings: new FileProjectSettings(projectSettingsPath(key, dataDir)),
                 });
@@ -173,18 +194,22 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
         return pending;
     };
 
-    /** Projects either agent knows, offered when a page's project can't be worked out. */
+    /** Projects any agent knows, offered when a page's project can't be worked out. */
     const choices = async () => {
-        const [t3, claude] = await Promise.all([
+        const [t3, claude, ensemble] = await Promise.all([
             listT3Projects({
                 baseUrl: t3Url,
                 token: options.t3?.token ?? process.env.TENCIL_T3_TOKEN,
                 credentials: options.t3?.credentials,
             }).catch(() => []),
             listClaudeCodeProjects({ installDir: claudeCodeDir }).catch(() => []),
+            listEnsembleProjects({
+                baseUrl: ensembleOptions.url,
+                ensembleDir: ensembleOptions.dir,
+            }).catch(() => []),
         ]);
         const byRoot = new Map<string, { root: string; title: string }>();
-        for (const project of [...t3, ...claude]) {
+        for (const project of [...t3, ...claude, ...ensemble]) {
             if (!byRoot.has(project.workspaceRoot)) {
                 byRoot.set(project.workspaceRoot, {
                     root: project.workspaceRoot,
@@ -195,7 +220,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
         return [...byRoot.values()];
     };
     const noChoicesHint =
-        "No projects found. Open this page's project in T3 Code, or run claude in it once.";
+        "No projects found. Open this page's project in T3 Code or Ensemble, or run claude in it once.";
 
     const settled = async () =>
         (await Promise.allSettled(sessions.values()))

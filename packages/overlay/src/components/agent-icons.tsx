@@ -15,7 +15,23 @@ const CURSOR =
 const T3 =
     'M33.4509 93V47.56H15.5309V37H64.3309V47.56H46.4109V93H33.4509ZM86.7253 93.96C82.832 93.96 78.9653 93.4533 75.1253 92.44C71.2853 91.3733 68.032 89.88 65.3653 87.96L70.4053 78.04C72.5386 79.5867 75.0186 80.8133 77.8453 81.72C80.672 82.6267 83.5253 83.08 86.4053 83.08C89.6586 83.08 92.2186 82.44 94.0853 81.16C95.952 79.88 96.8853 78.12 96.8853 75.88C96.8853 73.7467 96.0586 72.0667 94.4053 70.84C92.752 69.6133 90.0853 69 86.4053 69H80.4853V60.44L96.0853 42.76L97.5253 47.4H68.1653V37H107.365V45.4L91.8453 63.08L85.2853 59.32H89.0453C95.9253 59.32 101.125 60.8667 104.645 63.96C108.165 67.0533 109.925 71.0267 109.925 75.88C109.925 79.0267 109.099 81.9867 107.445 84.76C105.792 87.48 103.259 89.6933 99.8453 91.4C96.432 93.1067 92.0586 93.96 86.7253 93.96Z';
 
-const MARKS: Record<string, { viewBox: string; path: string; className: string; label: string }> = {
+/**
+ * Ensemble's mark (tryensemble.co/favicon.svg): four bars, each its own
+ * opacity, so it's a list of paths instead of one.
+ */
+const ENSEMBLE = [
+    { d: 'M2.5 3.25h3v13.5h-3z', opacity: 0.6 },
+    { d: 'M6.5 2h3v16h-3z' },
+    { d: 'M10.5 2.75h3v14.5h-3z', opacity: 0.8 },
+    { d: 'M14.5 4.25h3v11.5h-3z', opacity: 0.5 },
+];
+
+type MarkPath = { d: string; opacity?: number };
+
+const MARKS: Record<
+    string,
+    { viewBox: string; path: string | MarkPath[]; className: string; label: string }
+> = {
     t3code: {
         viewBox: '15.5309 37 94.3941 56.96',
         path: T3,
@@ -35,6 +51,12 @@ const MARKS: Record<string, { viewBox: string; path: string; className: string; 
         className: 'agent-mono',
         label: 'Cursor',
     },
+    ensemble: {
+        viewBox: '2 2 16 16',
+        path: ENSEMBLE,
+        className: 'agent-mono',
+        label: 'Ensemble',
+    },
 };
 
 /** Falls back on fuzzy matching so custom instance ids (`codex-work`) still resolve. */
@@ -44,6 +66,7 @@ function markFor(agent: string) {
     if (lower.includes('claude')) return MARKS.claudeAgent;
     if (lower.includes('codex') || lower.includes('openai')) return MARKS.codex;
     if (lower.includes('cursor')) return MARKS.cursor;
+    if (lower.includes('ensemble')) return MARKS.ensemble;
     return undefined;
 }
 
@@ -70,7 +93,11 @@ export function AgentIcon({
             aria-label={decorative ? undefined : mark.label}
             aria-hidden={decorative ? 'true' : undefined}
         >
-            <path d={mark.path} />
+            {typeof mark.path === 'string' ? (
+                <path d={mark.path} />
+            ) : (
+                mark.path.map(part => <path key={part.d} d={part.d} fill-opacity={part.opacity} />)
+            )}
         </svg>
     );
 }
