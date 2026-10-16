@@ -85,7 +85,7 @@ describe('Ensemble provider', () => {
         const { provider } = await setup({ seedProject: false });
         await provider.start();
         expect(provider.info().state).toBe('unavailable');
-        expect(provider.info().detail).toContain("isn't an Ensemble project");
+        expect(provider.info().detail).toContain("isn't in Ensemble yet");
     });
 
     it("is unavailable when Ensemble isn't installed", async () => {

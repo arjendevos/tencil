@@ -1,5 +1,6 @@
-import { realpath } from 'node:fs/promises';
-import { basename, relative, sep } from 'node:path';
+import { access, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import type {
     CreatedThread,
     CreateThreadInput,
@@ -284,8 +285,10 @@ export class EnsembleProvider implements Provider {
             if (!best || depth > best.depth) best = { project, depth };
         }
         if (best) return { kind: 'project', project: best.project };
+        // Ensemble projects are repositories; name the one to add, not the app folder inside it.
+        const repo = (await repositoryRoot(root)) ?? root;
         throw new Unavailable(
-            `${basename(root)} isn't an Ensemble project. Add its folder in Ensemble, then reload.`,
+            `${basename(repo)} isn't in Ensemble yet. Add ${tildify(repo)} as a project in Ensemble; Tencil picks it up on its own.`,
         );
     }
 
@@ -435,6 +438,25 @@ function attachment(image: ImageAttachment): EnsembleAttachment {
 function contains(folder: string, path: string): boolean {
     const rel = relative(folder, path);
     return rel === '' || (!rel.startsWith('..') && !rel.startsWith(sep) && !/^[a-z]:/i.test(rel));
+}
+
+/** The nearest folder at or above `dir` with a `.git` entry, if any. */
+async function repositoryRoot(dir: string): Promise<string | undefined> {
+    for (let current = dir; ; current = dirname(current)) {
+        if (await exists(join(current, '.git'))) return current;
+        if (dirname(current) === current) return undefined;
+    }
+}
+
+const exists = (path: string) =>
+    access(path).then(
+        () => true,
+        () => false,
+    );
+
+function tildify(path: string): string {
+    const home = homedir();
+    return path === home || path.startsWith(`${home}${sep}`) ? `~${path.slice(home.length)}` : path;
 }
 
 function errorMessage(error: unknown): string {
