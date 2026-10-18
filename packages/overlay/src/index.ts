@@ -36,7 +36,26 @@ function buildFromScript(): BuildInfo | undefined {
     };
 }
 
+/**
+ * The working pin's light sweeps by animating an angle. Unregistered, a custom property
+ * can't interpolate and the light would jump instead; `@property` is ignored in a shadow
+ * root, so it's registered on the document. Without support the light just holds still.
+ */
+function registerProperties(): void {
+    try {
+        CSS.registerProperty({
+            name: '--tencil-rim',
+            syntax: '<angle>',
+            inherits: false,
+            initialValue: '0deg',
+        });
+    } catch {
+        // Already registered (a second mount), or unsupported.
+    }
+}
+
 function mount(bridgeUrl: string, build: BuildInfo | undefined): void {
+    registerProperties();
     const host = document.createElement('tencil-overlay');
     host.setAttribute('data-tencil', '');
     host.style.cssText =

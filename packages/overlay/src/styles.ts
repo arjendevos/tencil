@@ -146,15 +146,41 @@ kbd {
 .pin-draft .pin-body { background: white; border-color: var(--accent); color: var(--accent); }
 /* Queued for a batch: not sent yet, so outlined rather than filled. */
 .pin-queued .pin-body { background: white; color: var(--accent); border: 2px dashed var(--accent); }
+/*
+ * Working: the pin turns into the logo (solid, no white rim) and a light travels
+ * round its edge, a bright head with a long tail. The fill and the 2px edge are
+ * ::before, the blurred glow ::after; both sit under the number, and isolation
+ * keeps them under the body's own stacking context however it's scaled.
+ */
+.pin-working .pin-body {
+  isolation: isolate;
+  background: transparent; border-color: transparent;
+}
+.pin-working .pin-body::before, .pin-working .pin-body::after {
+  content: ""; position: absolute; inset: -2px; z-index: -1;
+  border-radius: inherit;
+  animation: rim-travel 2s linear infinite;
+}
+/* The edge: white at the head on the pin's own colour, so it reads on any page. */
+.pin-working .pin-body::before {
+  border: 2px solid transparent;
+  background: linear-gradient(var(--pin), var(--pin)) padding-box,
+    conic-gradient(from var(--tencil-rim), #fff 0deg, #d9e8ff 22deg, #8fbcff 50deg,
+      color-mix(in oklab, var(--pin), white 22%) 96deg 312deg, #d9e8ff 348deg, #fff 360deg) border-box;
+}
+/* The glow: saturated, since a white one vanishes on a light page. */
 .pin-working .pin-body::after {
-  content: ""; position: absolute; inset: -6px;
-  border-radius: 18px 18px 18px 6px;
-  border: 2px solid transparent; border-top-color: var(--pin); border-right-color: var(--pin);
-  animation: spin 700ms linear infinite;
+  inset: -3px; z-index: -2;
+  background: conic-gradient(from var(--tencil-rim), var(--pin) 0deg,
+    color-mix(in oklab, var(--pin), white 20%) 30deg, color-mix(in oklab, var(--pin), white 50%) 60deg,
+    transparent 110deg 300deg, var(--pin) 360deg);
+  filter: blur(5px);
 }
 .pin-static { position: relative; width: 28px; height: 28px; flex: none; pointer-events: none; }
 .pin-static .pin-body { transform: none; border-color: var(--surface); box-shadow: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* Counter-clockwise, so the tail trails the head. Needs --tencil-rim registered (index.ts). */
+@keyframes rim-travel { from { --tencil-rim: 360deg; } to { --tencil-rim: 0deg; } }
 
 /* -------------------------------- popovers -------------------------------- */
 .popover {
@@ -674,6 +700,7 @@ kbd {
     transition-property: opacity, background-color, color;
   }
   .w { animation: none; }
+  .pin-working .pin-body::before, .pin-working .pin-body::after { animation-duration: 6s; }
   .shimmer > span[aria-hidden], .status-ping, .live-dot { animation: none; }
 }
 `;
