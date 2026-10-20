@@ -670,6 +670,8 @@ kbd {
 .tool-active { background: var(--accent); color: white; }
 .tool-active kbd { background: rgba(255, 255, 255, 0.22); color: white; }
 .tool-label { font-weight: 500; color: inherit; }
+/* A toggle that's off, like the struck-through ruler: dimmed until hovered. */
+.tool-off { color: rgba(255, 255, 255, 0.35); }
 .tool-send { background: var(--accent); color: white; }
 .tool-send:disabled { opacity: 0.5; cursor: default; }
 .tool:disabled { opacity: 0.45; cursor: default; }

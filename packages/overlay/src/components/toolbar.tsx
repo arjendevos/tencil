@@ -95,7 +95,7 @@ export function Toolbar() {
                 {rulerAvailable.value && (
                     <button
                         type="button"
-                        class="tool"
+                        class={`tool${rulerToggle.value ? '' : ' tool-off'}`}
                         title={
                             rulerToggle.value
                                 ? 'Ruler on: spacing while you pick, distances with Alt'
