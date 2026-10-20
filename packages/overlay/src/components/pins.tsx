@@ -197,7 +197,10 @@ function startPinDrag(event: PointerEvent, thread: Thread, tip: Point): void {
         const dx = moveEvent.clientX - startX;
         const dy = moveEvent.clientY - startY;
         if (!pinDrag.value && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-        pinDrag.value = { threadId: thread.id, point: { x: tip.x + dx, y: tip.y + dy } };
+        pinDrag.value = {
+            threadId: thread.id,
+            point: insidePage({ x: tip.x + dx, y: tip.y + dy }),
+        };
     };
 
     const end = (endEvent: PointerEvent) => {
@@ -221,6 +224,18 @@ function startPinDrag(event: PointerEvent, thread: Thread, tip: Point): void {
     window.addEventListener('dragstart', preventNativeDrag, true);
 }
 
+/**
+ * Keep a dragged tip over the page: past the window's edge or on its scrollbar
+ * there's no element to anchor to, and the pin would jump back on release.
+ */
+function insidePage(point: Point): Point {
+    const { clientWidth, clientHeight } = document.documentElement;
+    return {
+        x: Math.max(0, Math.min(point.x, clientWidth - 1)),
+        y: Math.max(0, Math.min(point.y, clientHeight - 1)),
+    };
+}
+
 function preventNativeDrag(event: DragEvent): void {
     event.preventDefault();
 }
@@ -240,7 +255,9 @@ function pageElementAt(point: Point): Element | null {
     return (
         document
             .elementsFromPoint(point.x, point.y)
-            .find(element => element !== host && element !== document.documentElement) ?? null
+            .find(element => element !== host && element !== document.documentElement) ??
+        // Below a short page there's only <html>; the body is the closest anchor.
+        document.body
     );
 }
 

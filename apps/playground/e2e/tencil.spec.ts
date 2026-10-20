@@ -117,6 +117,23 @@ test('drags a pin onto another element and keeps it there', async ({ page }) => 
     expect(Math.abs(to.y + to.height - tip.y)).toBeLessThan(4);
 });
 
+test('keeps a pin dragged past the window edge at that edge', async ({ page }) => {
+    await openPlayground(page);
+    const pin = overlay(page).locator('.pin .pin-body').first();
+    const from = (await pin.boundingBox())!;
+    const grab = { x: from.x + 6, y: from.y + from.height / 2 };
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    // The tip sits left of the pointer, so this puts it outside the window.
+    await page.mouse.move(2, 300, { steps: 12 });
+    await page.mouse.up();
+
+    await page.reload();
+    await expect(overlay(page).locator('.pin')).toHaveCount(1, { timeout: 15_000 });
+    const to = (await overlay(page).locator('.pin .pin-body').first().boundingBox())!;
+    expect(to.x).toBeLessThan(4);
+});
+
 test("lists the agent's threads and opens one in the dock", async ({ page }) => {
     await openPlayground(page);
     await overlay(page).locator('.tool[title="Pins"]').click();
