@@ -182,6 +182,74 @@ kbd {
 /* Counter-clockwise, so the tail trails the head. Needs --tencil-rim registered (index.ts). */
 @keyframes rim-travel { from { --tencil-rim: 360deg; } to { --tencil-rim: 0deg; } }
 
+/*
+ * A new pin blooms out of its tip: a burst of glow behind it, then one lap of
+ * the working pin's light round its edge.
+ */
+.pin-draft::before, .pin-resolving::before {
+  content: ""; position: absolute; left: 0; top: 0; width: 80px; height: 80px;
+  translate: -50% -50%; border-radius: 50%; pointer-events: none; opacity: 0;
+}
+.pin-draft::before {
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--accent), white 30%), transparent);
+  animation: pin-burst 700ms var(--ease-out);
+}
+.pin-draft .pin-body {
+  animation: pin-bloom 460ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  @starting-style { opacity: 1; transform: scale(1.1); }
+}
+.pin-draft .pin-body::before {
+  content: ""; position: absolute; inset: -2px; padding: 2px; border-radius: inherit;
+  pointer-events: none; opacity: 0;
+  background: conic-gradient(from var(--tencil-rim), #fff 0deg, #d9e8ff 30deg, transparent 120deg 360deg);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: pin-lap 800ms 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+/*
+ * A pin leaving the page (resolved or deleted) floats up and blurs away. A
+ * resolved one first turns green and swaps its number for a check as a shine
+ * crosses it, then leaves in a green glow. Pins.tsx keeps it mounted meanwhile.
+ */
+.pin-leaving { pointer-events: none; }
+.pin-leaving .pin-body {
+  transition: none;
+  animation: pin-dissolve 420ms cubic-bezier(0.55, 0, 1, 0.45) both;
+}
+.pin-resolving .pin-body {
+  animation: pin-done 220ms var(--ease-out) both,
+    pin-dissolve 420ms 480ms cubic-bezier(0.55, 0, 1, 0.45) both;
+}
+/* A working pin draws its fill on these; without them it turns green like the rest. */
+.pin-resolving .pin-body::before, .pin-resolving .pin-body::after { content: none; }
+.pin-resolving::before {
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--done), white 30%), transparent);
+  animation: pin-burst 600ms 480ms var(--ease-out) both;
+}
+.pin-glyph { grid-area: 1 / 1; display: grid; place-items: center; }
+/* Laid over the number, so the pin keeps its width. */
+.pin-check { position: absolute; inset: 0; opacity: 0; }
+.pin-check svg { width: 13px; height: 13px; stroke-width: 3; }
+.pin-resolving .pin-glyph:first-child { animation: pin-glyph-out 160ms ease-in both; }
+.pin-resolving .pin-check { animation: pin-glyph-in 260ms 60ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.pin-shine {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.75) 50%, transparent 70%)
+    100% 0 / 250% 100% no-repeat;
+  animation: pin-shine 520ms var(--ease-out) both;
+}
+@keyframes pin-bloom { from { scale: 0; opacity: 0; } 30% { opacity: 1; } }
+@keyframes pin-burst { from { scale: 0.08; opacity: 1; } to { scale: 1; opacity: 0; } }
+@keyframes pin-lap {
+  from { --tencil-rim: 220deg; opacity: 0; }
+  15%, 75% { opacity: 1; }
+  to { --tencil-rim: -140deg; opacity: 0; }
+}
+@keyframes pin-done { to { background-color: var(--done); border-color: white; } }
+@keyframes pin-dissolve { to { translate: 0 -12px; scale: 1.15; opacity: 0; filter: blur(6px); } }
+@keyframes pin-glyph-out { to { scale: 0.4; opacity: 0; filter: blur(2px); } }
+@keyframes pin-glyph-in { from { scale: 0.4; opacity: 0; filter: blur(2px); } to { opacity: 1; } }
+@keyframes pin-shine { to { background-position: 0 0; } }
+
 /* -------------------------------- popovers -------------------------------- */
 .popover {
   position: fixed;
@@ -701,6 +769,9 @@ kbd {
   }
   .w { animation: none; }
   .pin-working .pin-body::before, .pin-working .pin-body::after { animation-duration: 6s; }
+  .pin-draft::before, .pin-resolving::before, .pin-draft .pin-body::before, .pin-shine { display: none; }
+  @keyframes pin-bloom { from { opacity: 0; } }
+  @keyframes pin-dissolve { to { opacity: 0; } }
   .shimmer > span[aria-hidden], .status-ping, .live-dot { animation: none; }
 }
 `;
