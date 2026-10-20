@@ -404,3 +404,45 @@ test('starts with the ruler off and hides it in settings', async ({ page }) => {
     await setting.click();
     await expect(ruler).toHaveCount(1);
 });
+
+test('measures with Alt outside comment mode and comments on the selection', async ({ page }) => {
+    const sent: string[] = [];
+    page.on('websocket', socket =>
+        socket.on('framesent', frame => {
+            if (typeof frame.payload === 'string') sent.push(frame.payload);
+        }),
+    );
+    await openPlayground(page);
+    await overlay(page).getByRole('button', { name: 'Ruler', exact: true }).click();
+    const card = page.locator('article', { has: page.getByRole('button', { name: 'Choose Pro' }) });
+    const button = card.getByRole('button', { name: 'Choose Pro' });
+
+    // Without comment mode: nothing until Alt, then the box model and distances to the parent.
+    await button.hover();
+    await expect(overlay(page).locator('.highlight')).toHaveCount(0);
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.band-value-padding')).toHaveText(['12', '20', '12', '20']);
+    await expect(overlay(page).locator('.guide-value').filter({ hasText: /^25$/ })).toHaveCount(3);
+
+    // Alt-click selects the button to measure from; Alt-hover measures to the heading.
+    await button.click({ modifiers: ['Alt'] });
+    await expect(overlay(page).locator('.measure-box')).toHaveCount(1);
+    await card.getByRole('heading', { name: 'Pro' }).hover();
+    await expect(overlay(page).locator('.measure-target')).toHaveCount(1);
+    await page.keyboard.up('Alt');
+    await expect(overlay(page).locator('.toolbar-hint')).toContainText('C to comment');
+
+    // C comments on the selection, with the spacing it measured.
+    await page.keyboard.press('c');
+    await expect(overlay(page).locator('.composer-measure')).toContainText('h2');
+    const composer = overlay(page).locator('.composer textarea');
+    await composer.fill('Tighten the space above the button');
+    await composer.press('Enter');
+    await expect
+        .poll(() =>
+            sent.map(text => JSON.parse(text)).find(message => message.type === 'thread.create'),
+        )
+        .toMatchObject({
+            context: { tagName: 'button', spacing: { to: expect.stringContaining('h2') } },
+        });
+});

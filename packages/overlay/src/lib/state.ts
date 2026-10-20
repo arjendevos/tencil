@@ -21,6 +21,14 @@ export const mode = signal<Mode>('idle');
 export const hovered = signal<Element | null>(null);
 /** Alt is held: hovering measures distances instead of showing the box model. */
 export const measuring = signal(false);
+/**
+ * The ruler outside comment mode: Alt-click selects an element to measure
+ * from, and `C` comments on it. `offsets` is where it was clicked, for the pin.
+ */
+export const rulerAnchor = signal<{
+    element: Element;
+    offsets: Pick<Anchor, 'offsetX' | 'offsetY'>;
+} | null>(null);
 export const draft = signal<Draft | null>(null);
 export const openThreadId = signal<string | null>(null);
 export const inboxOpen = signal(false);
@@ -62,6 +70,7 @@ export function setRulerAvailable(on: boolean): void {
 
 export function toggleRuler(): void {
     rulerToggle.value = !rulerToggle.value;
+    rulerAnchor.value = null;
     try {
         localStorage.setItem(RULER_KEY, rulerToggle.value ? 'on' : 'off');
     } catch {
@@ -127,6 +136,7 @@ export const activeCount = computed(
 export function startPicking(): void {
     if (pinBlocked.value) return;
     draft.value = null;
+    rulerAnchor.value = null;
     openThreadId.value = null;
     mode.value = 'picking';
 }

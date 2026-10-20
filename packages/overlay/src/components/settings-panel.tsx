@@ -1,6 +1,7 @@
 import type { ProviderInfo } from '@tencildev/protocol';
 import { forgetToken, viewer } from '../lib/cloud-auth.ts';
 import { cloudUrl, project, provider, reconnect, send, settings } from '../lib/connection.ts';
+import { ALT_KEY } from '../lib/measure.ts';
 import { setBatchAvailable, setRulerAvailable, settingsOpen } from '../lib/state.ts';
 import { AgentIcon } from './agent-icons.tsx';
 import { CloseIcon, LayersIcon, RulerIcon } from './icons.tsx';
@@ -101,8 +102,8 @@ export function SettingsPanel() {
                         <span class="settings-switch-text">
                             <span class="settings-label">Ruler</span>
                             <span class="settings-help">
-                                Adds <RulerIcon /> to the toolbar: spacing while you pick, and
-                                distances with Alt.
+                                Adds <RulerIcon /> to the toolbar. With it on, hold {ALT_KEY} to
+                                measure spacing on the page.
                             </span>
                         </span>
                         <input

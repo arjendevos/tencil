@@ -1,3 +1,4 @@
+import type { Anchor } from '@tencildev/protocol';
 import { threads } from './connection.ts';
 import { captureContext, quickLabel } from './element-context.ts';
 import { offsetsIn } from './position.ts';
@@ -12,6 +13,7 @@ import {
     mode,
     openThreadId,
     pageKey,
+    rulerAnchor,
     rulerOn,
     settingsOpen,
     startPicking,
@@ -30,8 +32,9 @@ const BLOCKED_WHILE_PICKING = [
 
 /**
  * Global listeners: hover tracking + click capture in comment mode, the `C`
- * shortcut, Alt to measure, and layout invalidation for anchored UI. Everything
- * is attached in the capture phase so the page never sees comment-mode clicks.
+ * shortcut, Alt to measure (with the ruler on, anywhere on the page), and
+ * layout invalidation for anchored UI. Everything is attached in the capture
+ * phase so the page never sees comment-mode or measuring clicks.
  */
 export function installPicker(host: HTMLElement): () => void {
     const isOurs = (event: Event) => event.composedPath().includes(host);
@@ -45,17 +48,44 @@ export function installPicker(host: HTMLElement): () => void {
         return null;
     };
 
-    // With a comment open, Alt-hovering the page measures from its element.
-    const capturing = () =>
-        mode.value === 'picking' || (draft.value !== null && measuring.value && rulerOn.value);
+    // With the ruler on, Alt-hovering the page measures, comment open or not.
+    const capturing = () => mode.value === 'picking' || (measuring.value && rulerOn.value);
 
     let pointer: { x: number; y: number; ours: boolean } | null = null;
+    /** The element last measured against the ruler's anchor; `C` sends the spacing to it. */
+    let measuredFromAnchor: Element | null = null;
     const track = () => {
         if (!capturing()) {
             if (hovered.value) hovered.value = null;
             return;
         }
         hovered.value = !pointer || pointer.ours ? null : elementAt(pointer.x, pointer.y);
+        const anchor = rulerAnchor.value?.element;
+        if (anchor && hovered.value && hovered.value !== anchor) {
+            measuredFromAnchor = hovered.value;
+        }
+    };
+
+    const openDraft = (
+        element: Element,
+        offsets: Pick<Anchor, 'offsetX' | 'offsetY'>,
+        measuredTo?: { element: Element; parent: boolean },
+    ) => {
+        stopPicking();
+        rulerAnchor.value = null;
+        draft.value = {
+            element,
+            label: quickLabel(element),
+            anchor: {
+                // Filled in once context resolves; the live element reference drives layout until then.
+                selector: '',
+                ...offsets,
+            },
+            context: captureContext(element),
+            ...(measuredTo
+                ? { measuredTo: { ...measuredTo, label: quickLabel(measuredTo.element) } }
+                : {}),
+        };
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -69,7 +99,7 @@ export function installPicker(host: HTMLElement): () => void {
         if (event.key !== 'Alt') return;
         measuring.value = event.type === 'keydown';
         // Windows browsers focus their menu bar when Alt is released.
-        if (rulerOn.value && (mode.value === 'picking' || draft.value)) event.preventDefault();
+        if (rulerOn.value) event.preventDefault();
         track();
     };
     const onBlur = () => {
@@ -97,35 +127,34 @@ export function installPicker(host: HTMLElement): () => void {
         event.stopImmediatePropagation();
         const element = elementAt(event.clientX, event.clientY);
         if (!element) return;
-        const open = draft.value;
-        if (mode.value !== 'picking' && open) {
-            // Alt-click: measure the open comment's element against this one.
-            draft.value = {
-                ...open,
-                measuredTo:
-                    element === open.element
-                        ? undefined
-                        : { element, label: quickLabel(element), parent: false },
-            };
+        const offsets = offsetsIn(element, { x: event.clientX, y: event.clientY });
+        if (mode.value !== 'picking') {
+            const open = draft.value;
+            if (open) {
+                // Alt-click: measure the open comment's element against this one.
+                draft.value = {
+                    ...open,
+                    measuredTo:
+                        element === open.element
+                            ? undefined
+                            : { element, label: quickLabel(element), parent: false },
+                };
+            } else {
+                // Alt-click: measure from this element; again to let go of it.
+                const same = rulerAnchor.value?.element === element;
+                rulerAnchor.value = same ? null : { element, offsets };
+                measuredFromAnchor = null;
+                // The blocked click can't take focus off the toolbar; do it so `C` works.
+                const focused = host.shadowRoot?.activeElement;
+                if (focused instanceof HTMLElement) focused.blur();
+            }
             return;
         }
         const parent = element.parentElement;
-        stopPicking();
-        const context = captureContext(element);
-        draft.value = {
-            element,
-            label: quickLabel(element),
-            anchor: {
-                // Filled in once context resolves; the live element reference drives layout until then.
-                selector: '',
-                ...offsetsIn(element, { x: event.clientX, y: event.clientY }),
-            },
-            context,
-            // Alt-click while picking: measure against the parent, as the guides showed.
-            ...(event.altKey && rulerOn.value && parent && parent !== document.documentElement
-                ? { measuredTo: { element: parent, label: quickLabel(parent), parent: true } }
-                : {}),
-        };
+        // Alt-click while picking: measure against the parent, as the guides showed.
+        const measureParent =
+            event.altKey && rulerOn.value && parent && parent !== document.documentElement;
+        openDraft(element, offsets, measureParent ? { element: parent, parent: true } : undefined);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -133,6 +162,7 @@ export function installPicker(host: HTMLElement): () => void {
         if (event.key === 'Escape') {
             if (mode.value === 'picking') stopPicking();
             else if (draft.value) draft.value = null;
+            else if (rulerAnchor.value) rulerAnchor.value = null;
             else if (openThreadId.value) openThreadId.value = null;
             else if (inboxOpen.value) inboxOpen.value = false;
             else return;
@@ -143,8 +173,17 @@ export function installPicker(host: HTMLElement): () => void {
         if (event.key.toLowerCase() === 'c' && !event.metaKey && !event.ctrlKey && !event.altKey) {
             event.preventDefault();
             hidden.value = false;
+            const anchor = rulerAnchor.value;
             if (mode.value === 'picking') stopPicking();
-            else startPicking();
+            else if (anchor?.element.isConnected && !draft.value) {
+                // Comment on what the ruler selected, with the spacing it last measured.
+                const other = measuredFromAnchor?.isConnected ? measuredFromAnchor : null;
+                openDraft(
+                    anchor.element,
+                    anchor.offsets,
+                    other ? { element: other, parent: false } : undefined,
+                );
+            } else startPicking();
         }
     };
 
@@ -168,6 +207,7 @@ export function installPicker(host: HTMLElement): () => void {
         if (key !== currentPage.value) {
             currentPage.value = key;
             draft.value = null;
+            rulerAnchor.value = null;
             openThreadId.value = null;
         }
     }, 400);

@@ -1,44 +1,64 @@
 import { type Box, boxOf, type Guide, measureBetween } from '../lib/measure.ts';
 import type { Point } from '../lib/position.ts';
-import { draft, hovered, layoutTick, measuring, mode, rulerOn } from '../lib/state.ts';
-import { boxStyle, centeredAt } from './highlight.tsx';
+import { draft, hovered, layoutTick, measuring, mode, rulerAnchor, rulerOn } from '../lib/state.ts';
+import { boxStyle, centeredAt, ElementLabel } from './highlight.tsx';
 
 /**
- * Red distance lines, Figma style. Alt while picking: from the hovered element
- * to its parent. Alt with a comment open: from its element to the hovered one,
- * and after an Alt-click, to that element for as long as the comment is open.
+ * Red distance lines, Figma style, with the ruler on. Alt while picking, or
+ * anywhere with nothing selected: from the hovered element to its parent.
+ * Alt with a comment open: from its element to the hovered one, and after an
+ * Alt-click, to that element for as long as the comment is open. Outside
+ * comment mode, an Alt-click selects an element to measure from.
  */
 export function MeasureGuides() {
     layoutTick.value;
-    const pair = measuredPair();
-    if (!pair) return null;
-    const [element, other] = pair;
+    if (!rulerOn.value) return null;
+    const anchor = mode.value === 'idle' && !draft.value ? rulerAnchor.value?.element : undefined;
+    const pair = measuredPair(anchor);
+    const anchorBox = anchor?.isConnected ? boxOf(anchor.getBoundingClientRect()) : null;
+    return (
+        <>
+            {anchor && anchorBox && (
+                <>
+                    <div class="measure-box" style={boxStyle(anchorBox)} />
+                    <ElementLabel element={anchor} box={anchorBox} />
+                </>
+            )}
+            {pair && <Guides pair={pair} />}
+        </>
+    );
+}
+
+function Guides({ pair: [element, other] }: { pair: [Element, Element] }) {
     if (!element.isConnected || !other.isConnected) return null;
     const own = boxOf(element.getBoundingClientRect());
     const target = boxOf(other.getBoundingClientRect());
-    const guides = measureBetween(own, target);
+    const open = draft.value;
     return (
         <>
-            {mode.value !== 'picking' && <div class="measure-box" style={boxStyle(own)} />}
+            {/* The hovered element already has the picking highlight. */}
+            {open?.element === element && <div class="measure-box" style={boxStyle(own)} />}
             <div class="measure-target" style={boxStyle(target)} />
-            {guides.map(guide => (
+            {measureBetween(own, target).map(guide => (
                 <GuideLine key={guide.side} guide={guide} />
             ))}
         </>
     );
 }
 
-function measuredPair(): [Element, Element] | null {
-    if (!rulerOn.value) return null;
+function measuredPair(anchor: Element | undefined): [Element, Element] | null {
     const element = hovered.value;
-    if (mode.value === 'picking') {
+    const open = draft.value;
+    if (mode.value === 'picking' || (!open && !anchor)) {
         const parent = element?.parentElement;
         if (!measuring.value || !element || !parent || parent === document.documentElement) {
             return null;
         }
         return [element, parent];
     }
-    const open = draft.value;
+    if (anchor) {
+        return measuring.value && element && element !== anchor ? [anchor, element] : null;
+    }
     if (!open) return null;
     if (measuring.value && element && element !== open.element) return [open.element, element];
     return open.measuredTo ? [open.element, open.measuredTo.element] : null;

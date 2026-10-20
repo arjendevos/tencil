@@ -9,33 +9,46 @@ import {
     type Side,
     spacingClass,
 } from '../lib/measure.ts';
-import { hovered, layoutTick, measuring, mode, rulerOn } from '../lib/state.ts';
+import { draft, hovered, layoutTick, measuring, mode, rulerAnchor, rulerOn } from '../lib/state.ts';
 
 export function Highlight() {
     layoutTick.value;
     const element = hovered.value;
-    if (mode.value !== 'picking' || !element) return null;
-    const rect = element.getBoundingClientRect();
-    const labelBelow = rect.top < 28;
+    if (!element) return null;
+    const picking = mode.value === 'picking';
+    // The ruler outside comment mode: Alt-hovering shows what picking does,
+    // until an element is selected to measure from (MeasureGuides).
+    const ruling =
+        !picking && !draft.value && rulerOn.value && measuring.value && !rulerAnchor.value;
+    if (!picking && !ruling) return null;
+    const box = boxOf(element.getBoundingClientRect());
     return (
         <>
-            {/* Alt swaps the box model for distances (MeasureGuides). */}
-            {rulerOn.value && !measuring.value && (
-                <BoxModelBands element={element} box={boxOf(rect)} />
+            {/* While picking, Alt swaps the box model for distances. */}
+            {rulerOn.value && (ruling || !measuring.value) && (
+                <BoxModelBands element={element} box={box} />
             )}
-            <div class="highlight" style={boxStyle(boxOf(rect))} />
-            <div
-                class="highlight-label"
-                style={{
-                    transform: `translate(${Math.max(4, rect.left)}px, ${labelBelow ? rect.bottom + 6 : rect.top - 26}px)`,
-                }}
-            >
-                {quickLabel(element)}
-                <span class="highlight-size">
-                    {roundPx(rect.width)}×{roundPx(rect.height)}
-                </span>
-            </div>
+            <div class="highlight" style={boxStyle(box)} />
+            <ElementLabel element={element} box={box} />
         </>
+    );
+}
+
+/** Component, tag and size, above the element (below it at the top of the page). */
+export function ElementLabel({ element, box }: { element: Element; box: Box }) {
+    const below = box.top < 28;
+    return (
+        <div
+            class="highlight-label"
+            style={{
+                transform: `translate(${Math.max(4, box.left)}px, ${below ? box.bottom + 6 : box.top - 26}px)`,
+            }}
+        >
+            {quickLabel(element)}
+            <span class="highlight-size">
+                {roundPx(box.right - box.left)}×{roundPx(box.bottom - box.top)}
+            </span>
+        </div>
     );
 }
 
