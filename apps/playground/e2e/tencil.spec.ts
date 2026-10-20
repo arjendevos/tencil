@@ -389,8 +389,8 @@ test('starts with the ruler off and hides it in settings', async ({ page }) => {
     await page.keyboard.up('Alt');
     await page.keyboard.press('Escape');
 
-    // Turned on, it stays on across reloads.
-    await ruler.click();
+    // Turned on (R), it stays on across reloads.
+    await page.keyboard.press('r');
     await expect(ruler).toHaveAttribute('aria-pressed', 'true');
     await page.reload();
     await expect(ruler).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });

@@ -14,10 +14,12 @@ import {
     openThreadId,
     pageKey,
     rulerAnchor,
+    rulerAvailable,
     rulerOn,
     settingsOpen,
     startPicking,
     stopPicking,
+    toggleRuler,
 } from './state.ts';
 
 const BLOCKED_WHILE_PICKING = [
@@ -32,7 +34,7 @@ const BLOCKED_WHILE_PICKING = [
 
 /**
  * Global listeners: hover tracking + click capture in comment mode, the `C`
- * shortcut, Alt to measure (with the ruler on, anywhere on the page), and
+ * and `R` (ruler) shortcuts, Alt to measure (with the ruler on, anywhere on the page), and
  * layout invalidation for anchored UI. Everything is attached in the capture
  * phase so the page never sees comment-mode or measuring clicks.
  */
@@ -170,7 +172,13 @@ export function installPicker(host: HTMLElement): () => void {
             return;
         }
         if (isTyping(event)) return;
-        if (event.key.toLowerCase() === 'c' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+        if (event.key.toLowerCase() === 'r' && plain && rulerAvailable.value) {
+            event.preventDefault();
+            toggleRuler();
+            return;
+        }
+        if (event.key.toLowerCase() === 'c' && plain) {
             event.preventDefault();
             hidden.value = false;
             const anchor = rulerAnchor.value;

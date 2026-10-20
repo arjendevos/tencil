@@ -109,7 +109,9 @@ export function Toolbar() {
                         type="button"
                         class={`tool${rulerToggle.value ? '' : ' tool-off'}`}
                         title={
-                            rulerToggle.value ? `Ruler on: hold ${ALT_KEY} to measure` : 'Ruler off'
+                            rulerToggle.value
+                                ? `Ruler on (R): hold ${ALT_KEY} to measure`
+                                : 'Ruler off (R)'
                         }
                         aria-label="Ruler"
                         aria-pressed={rulerToggle.value}
