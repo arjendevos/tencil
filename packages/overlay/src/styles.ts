@@ -225,7 +225,7 @@ kbd {
   background: radial-gradient(closest-side, color-mix(in oklab, var(--done), white 30%), transparent);
   animation: pin-burst 600ms 480ms var(--ease-out) both;
 }
-.pin-glyph { grid-area: 1 / 1; display: grid; place-items: center; }
+.pin-glyph { display: grid; place-items: center; }
 /* Laid over the number, so the pin keeps its width. */
 .pin-check { position: absolute; inset: 0; opacity: 0; }
 .pin-check svg { width: 13px; height: 13px; stroke-width: 3; }
