@@ -49,7 +49,7 @@ export const rulerAvailable = computed(() => {
     // A bridge from before the setting leaves it out: offer the ruler.
     return current !== null && current.ruler !== false;
 });
-/** The toolbar's ruler toggle. Remembered per browser, on by default. */
+/** The toolbar's ruler toggle. Remembered per browser, off until turned on. */
 export const rulerToggle = signal(readRuler());
 /** Picking shows the box model, and Alt measures distances. */
 export const rulerOn = computed(() => rulerAvailable.value && rulerToggle.value);
@@ -71,9 +71,9 @@ export function toggleRuler(): void {
 
 function readRuler(): boolean {
     try {
-        return localStorage.getItem(RULER_KEY) !== 'off';
+        return localStorage.getItem(RULER_KEY) === 'on';
     } catch {
-        return true;
+        return false;
     }
 }
 /** A pin being dragged: where its tip is now, so its open thread can follow. */

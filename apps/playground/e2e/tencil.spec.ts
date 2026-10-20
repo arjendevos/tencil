@@ -325,8 +325,9 @@ test('measures spacing with Alt and sends it with the comment', async ({ page })
     const card = page.locator('article', { has: page.getByRole('button', { name: 'Choose Pro' }) });
     const button = card.getByRole('button', { name: 'Choose Pro' });
 
-    // Hovering shows the box model: the button's padding, the card's gap.
-    await page.keyboard.press('c');
+    // Hovering shows the box model once the ruler is on: the button's padding, the card's gap.
+    await overlay(page).getByRole('button', { name: 'Ruler', exact: true }).click();
+    await overlay(page).locator('.tool[title="Comment (C)"]').click();
     await button.hover();
     await expect(overlay(page).locator('.band-value-padding')).toHaveText(['12', '20', '12', '20']);
     await card.hover({ position: { x: 4, y: 4 } });
@@ -373,15 +374,13 @@ test('measures spacing with Alt and sends it with the comment', async ({ page })
         });
 });
 
-test('turns the ruler off in the toolbar and hides it in settings', async ({ page }) => {
+test('starts with the ruler off and hides it in settings', async ({ page }) => {
     await openPlayground(page);
     const ruler = overlay(page).getByRole('button', { name: 'Ruler', exact: true });
-    await expect(ruler).toHaveAttribute('aria-pressed', 'true');
-    await ruler.click();
     await expect(ruler).toHaveAttribute('aria-pressed', 'false');
 
-    // Off: picking is back to a plain highlight, and Alt measures nothing.
-    await overlay(page).locator('.tool[title="Comment (C)"]').click();
+    // Off: picking shows a plain highlight, and Alt measures nothing.
+    await page.keyboard.press('c');
     await page.getByRole('button', { name: 'Choose Pro' }).hover();
     await expect(overlay(page).locator('.highlight')).toBeVisible();
     await expect(overlay(page).locator('.band')).toHaveCount(0);
@@ -390,9 +389,11 @@ test('turns the ruler off in the toolbar and hides it in settings', async ({ pag
     await page.keyboard.up('Alt');
     await page.keyboard.press('Escape');
 
-    // Remembered across reloads.
+    // Turned on, it stays on across reloads.
+    await ruler.click();
+    await expect(ruler).toHaveAttribute('aria-pressed', 'true');
     await page.reload();
-    await expect(ruler).toHaveAttribute('aria-pressed', 'false', { timeout: 15_000 });
+    await expect(ruler).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
 
     // The project setting takes the button away altogether.
     await overlay(page).locator('.tool[title="Project settings"]').click();
