@@ -313,3 +313,62 @@ test("stands beside Next.js's dev tools button in its corner", async ({ page }) 
     });
     await expect(wrap).toHaveCSS('left', '20px');
 });
+
+test('measures spacing with Alt and sends it with the comment', async ({ page }) => {
+    const sent: string[] = [];
+    page.on('websocket', socket =>
+        socket.on('framesent', frame => {
+            if (typeof frame.payload === 'string') sent.push(frame.payload);
+        }),
+    );
+    await openPlayground(page);
+    const card = page.locator('article', { has: page.getByRole('button', { name: 'Choose Pro' }) });
+    const button = card.getByRole('button', { name: 'Choose Pro' });
+
+    // Hovering shows the box model: the button's padding, the card's gap.
+    await page.keyboard.press('c');
+    await button.hover();
+    await expect(overlay(page).locator('.band-value-padding')).toHaveText(['12', '20', '12', '20']);
+    await card.hover({ position: { x: 4, y: 4 } });
+    await expect(overlay(page).locator('.band-value-gap').first()).toHaveText('12');
+
+    // Alt: distances to the parent instead, without moving the mouse.
+    await button.hover();
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.band')).toHaveCount(0);
+    // The card's 1px border plus its 24px padding.
+    await expect(overlay(page).locator('.guide-value').filter({ hasText: /^25$/ })).toHaveCount(3);
+
+    // Alt-click pins it with the spacing to its parent.
+    await button.click({ modifiers: ['Alt'] });
+    await page.keyboard.up('Alt');
+    const measured = overlay(page).locator('.composer-measure');
+    await expect(measured).toContainText('Parent');
+    await expect(measured).toContainText('25 right, 25 below, 25 left');
+
+    // With the comment open, Alt-click another element to measure against it instead.
+    const heading = card.getByRole('heading', { name: 'Pro' });
+    await heading.hover();
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.measure-target')).toHaveCount(1);
+    await heading.click({ modifiers: ['Alt'] });
+    await page.keyboard.up('Alt');
+    await expect(measured).toContainText('h2');
+    await expect(measured).not.toContainText('Parent');
+
+    const composer = overlay(page).locator('.composer textarea');
+    await expect(composer).toBeFocused();
+    await composer.fill('Move the button closer to the heading');
+    await composer.press('Enter');
+
+    await expect
+        .poll(() =>
+            sent.map(text => JSON.parse(text)).find(message => message.type === 'thread.create'),
+        )
+        .toMatchObject({
+            context: {
+                box: { padding: [12, 20, 12, 20] },
+                spacing: { to: expect.stringContaining('h2'), top: expect.any(Number) },
+            },
+        });
+});

@@ -8,6 +8,7 @@ import {
     hovered,
     inboxOpen,
     layoutTick,
+    measuring,
     mode,
     openThreadId,
     pageKey,
@@ -28,8 +29,8 @@ const BLOCKED_WHILE_PICKING = [
 
 /**
  * Global listeners: hover tracking + click capture in comment mode, the `C`
- * shortcut, and layout invalidation for anchored UI. Everything is attached in
- * the capture phase so the page never sees comment-mode clicks.
+ * shortcut, Alt to measure, and layout invalidation for anchored UI. Everything
+ * is attached in the capture phase so the page never sees comment-mode clicks.
  */
 export function installPicker(host: HTMLElement): () => void {
     const isOurs = (event: Event) => event.composedPath().includes(host);
@@ -43,31 +44,70 @@ export function installPicker(host: HTMLElement): () => void {
         return null;
     };
 
+    // With a comment open, Alt-hovering the page measures from its element.
+    const capturing = () => mode.value === 'picking' || (draft.value !== null && measuring.value);
+
+    let pointer: { x: number; y: number; ours: boolean } | null = null;
+    const track = () => {
+        if (!capturing()) {
+            if (hovered.value) hovered.value = null;
+            return;
+        }
+        hovered.value = !pointer || pointer.ours ? null : elementAt(pointer.x, pointer.y);
+    };
+
     const onPointerMove = (event: PointerEvent) => {
-        if (mode.value !== 'picking') return;
-        hovered.value = isOurs(event) ? null : elementAt(event.clientX, event.clientY);
+        pointer = { x: event.clientX, y: event.clientY, ours: isOurs(event) };
+        measuring.value = event.altKey;
+        track();
+    };
+
+    // Pressing or releasing Alt redraws right away, without moving the mouse.
+    const onAlt = (event: KeyboardEvent) => {
+        if (event.key !== 'Alt') return;
+        measuring.value = event.type === 'keydown';
+        // Windows browsers focus their menu bar when Alt is released.
+        if (mode.value === 'picking' || draft.value) event.preventDefault();
+        track();
+    };
+    const onBlur = () => {
+        measuring.value = false;
+        track();
     };
 
     const block = (event: Event) => {
         // Clicking the page dismisses an open pin (the page still gets the click).
-        if (mode.value === 'idle' && event.type === 'pointerdown' && !isOurs(event)) {
+        if (!capturing() && event.type === 'pointerdown' && !isOurs(event)) {
             settingsOpen.value = false;
             // Docked (unpinned) threads stay open while you use the page.
             const open = openThreadId.value ? threads.value.get(openThreadId.value) : undefined;
             if (open?.anchor) openThreadId.value = null;
             return;
         }
-        if (mode.value !== 'picking' || isOurs(event)) return;
+        if (!capturing() || isOurs(event)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
     };
 
     const onClick = (event: MouseEvent) => {
-        if (mode.value !== 'picking' || isOurs(event)) return;
+        if (!capturing() || isOurs(event)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const element = elementAt(event.clientX, event.clientY);
         if (!element) return;
+        const open = draft.value;
+        if (mode.value !== 'picking' && open) {
+            // Alt-click: measure the open comment's element against this one.
+            draft.value = {
+                ...open,
+                measuredTo:
+                    element === open.element
+                        ? undefined
+                        : { element, label: quickLabel(element), parent: false },
+            };
+            return;
+        }
+        const parent = element.parentElement;
         stopPicking();
         const context = captureContext(element);
         draft.value = {
@@ -79,6 +119,10 @@ export function installPicker(host: HTMLElement): () => void {
                 ...offsetsIn(element, { x: event.clientX, y: event.clientY }),
             },
             context,
+            // Alt-click while picking: measure against the parent, as the guides showed.
+            ...(event.altKey && parent && parent !== document.documentElement
+                ? { measuredTo: { element: parent, label: quickLabel(parent), parent: true } }
+                : {}),
         };
     };
 
@@ -130,6 +174,9 @@ export function installPicker(host: HTMLElement): () => void {
     for (const type of BLOCKED_WHILE_PICKING) window.addEventListener(type, block, true);
     window.addEventListener('click', onClick, true);
     window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keydown', onAlt, true);
+    window.addEventListener('keyup', onAlt, true);
+    window.addEventListener('blur', onBlur);
     window.addEventListener('scroll', invalidate, { capture: true, passive: true });
     window.addEventListener('resize', invalidate, { passive: true });
 
@@ -138,6 +185,9 @@ export function installPicker(host: HTMLElement): () => void {
         for (const type of BLOCKED_WHILE_PICKING) window.removeEventListener(type, block, true);
         window.removeEventListener('click', onClick, true);
         window.removeEventListener('keydown', onKeyDown, true);
+        window.removeEventListener('keydown', onAlt, true);
+        window.removeEventListener('keyup', onAlt, true);
+        window.removeEventListener('blur', onBlur);
         window.removeEventListener('scroll', invalidate, true);
         window.removeEventListener('resize', invalidate);
         mutations.disconnect();

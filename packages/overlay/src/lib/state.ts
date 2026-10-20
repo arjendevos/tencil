@@ -13,10 +13,14 @@ export interface Draft {
     label: string;
     /** Source maps are fetched lazily, so the full context resolves later. */
     context: Promise<ElementContext>;
+    /** Measured against with Alt: the pin's context gets the spacing to it. */
+    measuredTo?: { element: Element; label: string; parent: boolean };
 }
 
 export const mode = signal<Mode>('idle');
 export const hovered = signal<Element | null>(null);
+/** Alt is held: hovering measures distances instead of showing the box model. */
+export const measuring = signal(false);
 export const draft = signal<Draft | null>(null);
 export const openThreadId = signal<string | null>(null);
 export const inboxOpen = signal(false);

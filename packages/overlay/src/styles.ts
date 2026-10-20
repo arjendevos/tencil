@@ -27,6 +27,7 @@ export const styles = /* css */ `
   --done: #1a896b;
   --warn: #b7791f;
   --error: #d93036;
+  --measure: #f24822;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-text: cubic-bezier(0.22, 1, 0.36, 1);
@@ -114,6 +115,40 @@ kbd {
 }
 .highlight-size { opacity: 0.75; }
 
+/* -------------------------------- measuring ------------------------------- */
+/* Box model colours follow browser devtools; distances are Figma's red. */
+.band, .guide, .measure-box, .measure-target {
+  position: fixed; left: 0; top: 0;
+  pointer-events: none;
+}
+.band-margin { background: hsl(30 90% 55% / 0.22); }
+.band-padding { background: hsl(140 55% 45% / 0.22); }
+.band-gap {
+  background: repeating-linear-gradient(
+    45deg, hsl(280 60% 55% / 0.28) 0 2px, hsl(280 60% 55% / 0.1) 2px 6px
+  );
+}
+.band-value, .guide-value {
+  position: fixed; left: 0; top: 0;
+  display: flex; gap: 4px; align-items: center;
+  padding: 0 4px; border-radius: 4px;
+  font: 500 10px/15px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: white; white-space: nowrap;
+  pointer-events: none;
+}
+.band-value-margin { background: hsl(30 80% 42%); }
+.band-value-padding { background: hsl(140 55% 30%); }
+.band-value-gap { background: hsl(280 50% 45%); }
+.band-utility { opacity: 0.75; }
+.guide { background: var(--measure); }
+.guide-extension {
+  background: none;
+  border: 0 dashed var(--measure); border-left-width: 1px; border-top-width: 1px;
+}
+.guide-value { background: var(--measure); }
+.measure-box { border: 1.5px solid var(--accent); border-radius: 4px; }
+.measure-target { border: 1px dashed var(--measure); }
+
 /* ---------------------------------- pins --------------------------------- */
 .pin {
   position: fixed; left: 0; top: 0; width: 0; height: 0;
@@ -169,6 +204,13 @@ kbd {
 
 .composer { padding: 10px; display: grid; gap: 8px; }
 .composer-target { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 2px; }
+.composer-measure {
+  display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 2px;
+  color: var(--n-600); font-size: 12px;
+}
+.composer-measure-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-measure-target { color: var(--measure); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.composer-measure .icon-button { width: 22px; height: 22px; flex: none; }
 .composer-provider {
   display: inline-flex; align-items: center; gap: 4px; min-width: 0; margin-left: auto;
   padding: 2px 6px; border-radius: 7px; color: var(--n-600); font-size: 12px;
