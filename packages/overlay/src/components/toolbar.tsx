@@ -18,9 +18,12 @@ import {
     inboxOpen,
     mode,
     queuedThreads,
+    rulerAvailable,
+    rulerToggle,
     settingsOpen,
     startPicking,
     stopPicking,
+    toggleRuler,
     unresolvedCount,
 } from '../lib/state.ts';
 import {
@@ -29,6 +32,8 @@ import {
     EyeIcon,
     EyeOffIcon,
     InboxIcon,
+    RulerIcon,
+    RulerOffIcon,
     SettingsIcon,
 } from './icons.tsx';
 import { sendQueued } from './pins.tsx';
@@ -87,6 +92,22 @@ export function Toolbar() {
                     <span class="tool-label">Comment</span>
                     <kbd>C</kbd>
                 </button>
+                {rulerAvailable.value && (
+                    <button
+                        type="button"
+                        class="tool"
+                        title={
+                            rulerToggle.value
+                                ? 'Ruler on: spacing while you pick, distances with Alt'
+                                : 'Ruler off'
+                        }
+                        aria-label="Ruler"
+                        aria-pressed={rulerToggle.value}
+                        onClick={toggleRuler}
+                    >
+                        {rulerToggle.value ? <RulerIcon /> : <RulerOffIcon />}
+                    </button>
+                )}
                 {queuedThreads.value.length > 0 && (
                     <button
                         type="button"

@@ -1,13 +1,13 @@
 import type { ProviderInfo } from '@tencildev/protocol';
 import { forgetToken, viewer } from '../lib/cloud-auth.ts';
 import { cloudUrl, project, provider, reconnect, send, settings } from '../lib/connection.ts';
-import { setBatchAvailable, settingsOpen } from '../lib/state.ts';
+import { setBatchAvailable, setRulerAvailable, settingsOpen } from '../lib/state.ts';
 import { AgentIcon } from './agent-icons.tsx';
-import { CloseIcon, LayersIcon } from './icons.tsx';
+import { CloseIcon, LayersIcon, RulerIcon } from './icons.tsx';
 
 /**
  * Per-project settings, opened from the toolbar and drawn next to it: which
- * agent new pins go to, and whether comments are batched.
+ * agent new pins go to, whether comments are batched, and the ruler.
  */
 export function SettingsPanel() {
     if (!settingsOpen.value) return null;
@@ -95,6 +95,23 @@ export function SettingsPanel() {
                             checked={current.batch}
                             aria-checked={current.batch}
                             onChange={event => setBatchAvailable(event.currentTarget.checked)}
+                        />
+                    </label>
+                    <label class="settings-section settings-switch-row">
+                        <span class="settings-switch-text">
+                            <span class="settings-label">Ruler</span>
+                            <span class="settings-help">
+                                Adds <RulerIcon /> to the toolbar: spacing while you pick, and
+                                distances with Alt.
+                            </span>
+                        </span>
+                        <input
+                            type="checkbox"
+                            role="switch"
+                            class="settings-switch"
+                            checked={current.ruler}
+                            aria-checked={current.ruler}
+                            onChange={event => setRulerAvailable(event.currentTarget.checked)}
                         />
                     </label>
                 </>

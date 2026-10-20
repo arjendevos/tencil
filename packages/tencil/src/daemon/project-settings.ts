@@ -12,6 +12,8 @@ const SettingsFile = z.object({
     models: z.record(z.string(), z.string()).optional(),
     /** Queue new comments and send them together. */
     batch: z.boolean().optional(),
+    /** Offer the ruler in the overlay's toolbar. */
+    ruler: z.boolean().optional(),
 });
 
 /** A project's settings live next to its pins: `<slug>-<hash>.settings.json`. */
@@ -19,7 +21,7 @@ export function projectSettingsPath(projectRoot: string, dataDir = defaultDataDi
     return projectStorePath(projectRoot, dataDir).replace(/\.json$/, '.settings.json');
 }
 
-/** A project's overlay settings (provider, models, batching) in a JSON file. */
+/** A project's overlay settings (provider, models, batching, ruler) in a JSON file. */
 export class FileProjectSettings implements ProjectSettingsStore {
     constructor(readonly path: string) {}
 
@@ -40,6 +42,7 @@ export class FileProjectSettings implements ProjectSettingsStore {
                     provider: settings.provider,
                     models: settings.models,
                     batch: settings.batch,
+                    ruler: settings.ruler,
                 },
                 null,
                 2,

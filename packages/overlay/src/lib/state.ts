@@ -40,6 +40,42 @@ export function setBatchAvailable(on: boolean): void {
     // Flip right away; the daemon's settings broadcast confirms it.
     settings.value = { ...current, batch: on };
 }
+
+const RULER_KEY = 'tencil:ruler';
+
+/** The project offers the ruler: the toolbar then has a ruler toggle. */
+export const rulerAvailable = computed(() => {
+    const current = settings.value;
+    // A bridge from before the setting leaves it out: offer the ruler.
+    return current !== null && current.ruler !== false;
+});
+/** The toolbar's ruler toggle. Remembered per browser, on by default. */
+export const rulerToggle = signal(readRuler());
+/** Picking shows the box model, and Alt measures distances. */
+export const rulerOn = computed(() => rulerAvailable.value && rulerToggle.value);
+
+export function setRulerAvailable(on: boolean): void {
+    const current = settings.value;
+    if (!current || !send({ type: 'settings.update', ruler: on })) return;
+    settings.value = { ...current, ruler: on };
+}
+
+export function toggleRuler(): void {
+    rulerToggle.value = !rulerToggle.value;
+    try {
+        localStorage.setItem(RULER_KEY, rulerToggle.value ? 'on' : 'off');
+    } catch {
+        // Storage can be blocked; the choice just won't persist.
+    }
+}
+
+function readRuler(): boolean {
+    try {
+        return localStorage.getItem(RULER_KEY) !== 'off';
+    } catch {
+        return true;
+    }
+}
 /** A pin being dragged: where its tip is now, so its open thread can follow. */
 export const pinDrag = signal<{ threadId: string; point: Point } | null>(null);
 

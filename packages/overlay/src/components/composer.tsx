@@ -33,6 +33,7 @@ import {
     layoutTick,
     openThreadId,
     queuedThreads,
+    rulerOn,
     startPicking,
 } from '../lib/state.ts';
 import { AgentIcon } from './agent-icons.tsx';
@@ -178,7 +179,7 @@ export function Composer() {
                     </button>
                 )}
             </div>
-            {pending.measuredTo && <MeasuredTo pending={pending} />}
+            {pending.measuredTo && rulerOn.value && <MeasuredTo pending={pending} />}
             {menu === 'target' && !batching && (
                 <TargetMenu
                     onPick={summary => {
@@ -300,7 +301,14 @@ function MeasuredTo({ pending }: { pending: Draft }) {
 /** Measured now, so the agent gets the layout as it is when the comment is sent. */
 function spacingFor(pending: Draft): ElementContext['spacing'] {
     const measured = pending.measuredTo;
-    if (!measured || !pending.element.isConnected || !measured.element.isConnected) return;
+    // Turning the ruler off drops what was measured.
+    if (
+        !measured ||
+        !rulerOn.value ||
+        !pending.element.isConnected ||
+        !measured.element.isConnected
+    )
+        return;
     const guides = measureBetween(
         boxOf(pending.element.getBoundingClientRect()),
         boxOf(measured.element.getBoundingClientRect()),

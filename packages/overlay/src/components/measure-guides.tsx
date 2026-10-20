@@ -1,6 +1,6 @@
 import { type Box, boxOf, type Guide, measureBetween } from '../lib/measure.ts';
 import type { Point } from '../lib/position.ts';
-import { draft, hovered, layoutTick, measuring, mode } from '../lib/state.ts';
+import { draft, hovered, layoutTick, measuring, mode, rulerOn } from '../lib/state.ts';
 import { boxStyle, centeredAt } from './highlight.tsx';
 
 /**
@@ -29,6 +29,7 @@ export function MeasureGuides() {
 }
 
 function measuredPair(): [Element, Element] | null {
+    if (!rulerOn.value) return null;
     const element = hovered.value;
     if (mode.value === 'picking') {
         const parent = element?.parentElement;

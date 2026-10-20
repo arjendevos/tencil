@@ -372,3 +372,34 @@ test('measures spacing with Alt and sends it with the comment', async ({ page })
             },
         });
 });
+
+test('turns the ruler off in the toolbar and hides it in settings', async ({ page }) => {
+    await openPlayground(page);
+    const ruler = overlay(page).getByRole('button', { name: 'Ruler', exact: true });
+    await expect(ruler).toHaveAttribute('aria-pressed', 'true');
+    await ruler.click();
+    await expect(ruler).toHaveAttribute('aria-pressed', 'false');
+
+    // Off: picking is back to a plain highlight, and Alt measures nothing.
+    await overlay(page).locator('.tool[title="Comment (C)"]').click();
+    await page.getByRole('button', { name: 'Choose Pro' }).hover();
+    await expect(overlay(page).locator('.highlight')).toBeVisible();
+    await expect(overlay(page).locator('.band')).toHaveCount(0);
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.guide')).toHaveCount(0);
+    await page.keyboard.up('Alt');
+    await page.keyboard.press('Escape');
+
+    // Remembered across reloads.
+    await page.reload();
+    await expect(ruler).toHaveAttribute('aria-pressed', 'false', { timeout: 15_000 });
+
+    // The project setting takes the button away altogether.
+    await overlay(page).locator('.tool[title="Project settings"]').click();
+    const setting = overlay(page).getByRole('switch', { name: /Ruler/ });
+    await expect(setting).toBeChecked();
+    await setting.click();
+    await expect(ruler).toHaveCount(0);
+    await setting.click();
+    await expect(ruler).toHaveCount(1);
+});

@@ -131,6 +131,21 @@ export const LayersIcon = () => (
     </Icon>
 );
 
+export const RulerIcon = () => (
+    <Icon>
+        <rect x="2" y="7" width="20" height="10" rx="2" />
+        <path d="M6 7v3M10 7v4M14 7v3M18 7v4" />
+    </Icon>
+);
+
+/** The ruler, struck through: measuring is off. */
+export const RulerOffIcon = () => (
+    <Icon>
+        <rect x="2" y="7" width="20" height="10" rx="2" />
+        <path d="M6 7v3M10 7v4M14 7v3M18 7v4M3 3l18 18" />
+    </Icon>
+);
+
 export const ChevronIcon = () => (
     <Icon size={12}>
         <path d="m6 9 6 6 6-6" />

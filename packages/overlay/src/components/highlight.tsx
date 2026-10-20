@@ -9,7 +9,7 @@ import {
     type Side,
     spacingClass,
 } from '../lib/measure.ts';
-import { hovered, layoutTick, measuring, mode } from '../lib/state.ts';
+import { hovered, layoutTick, measuring, mode, rulerOn } from '../lib/state.ts';
 
 export function Highlight() {
     layoutTick.value;
@@ -20,7 +20,9 @@ export function Highlight() {
     return (
         <>
             {/* Alt swaps the box model for distances (MeasureGuides). */}
-            {!measuring.value && <BoxModelBands element={element} box={boxOf(rect)} />}
+            {rulerOn.value && !measuring.value && (
+                <BoxModelBands element={element} box={boxOf(rect)} />
+            )}
             <div class="highlight" style={boxStyle(boxOf(rect))} />
             <div
                 class="highlight-label"

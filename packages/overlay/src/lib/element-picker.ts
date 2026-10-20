@@ -12,6 +12,7 @@ import {
     mode,
     openThreadId,
     pageKey,
+    rulerOn,
     settingsOpen,
     startPicking,
     stopPicking,
@@ -45,7 +46,8 @@ export function installPicker(host: HTMLElement): () => void {
     };
 
     // With a comment open, Alt-hovering the page measures from its element.
-    const capturing = () => mode.value === 'picking' || (draft.value !== null && measuring.value);
+    const capturing = () =>
+        mode.value === 'picking' || (draft.value !== null && measuring.value && rulerOn.value);
 
     let pointer: { x: number; y: number; ours: boolean } | null = null;
     const track = () => {
@@ -67,7 +69,7 @@ export function installPicker(host: HTMLElement): () => void {
         if (event.key !== 'Alt') return;
         measuring.value = event.type === 'keydown';
         // Windows browsers focus their menu bar when Alt is released.
-        if (mode.value === 'picking' || draft.value) event.preventDefault();
+        if (rulerOn.value && (mode.value === 'picking' || draft.value)) event.preventDefault();
         track();
     };
     const onBlur = () => {
@@ -120,7 +122,7 @@ export function installPicker(host: HTMLElement): () => void {
             },
             context,
             // Alt-click while picking: measure against the parent, as the guides showed.
-            ...(event.altKey && parent && parent !== document.documentElement
+            ...(event.altKey && rulerOn.value && parent && parent !== document.documentElement
                 ? { measuredTo: { element: parent, label: quickLabel(parent), parent: true } }
                 : {}),
         };
