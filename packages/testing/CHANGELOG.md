@@ -1,5 +1,12 @@
 # @tencildev/testing
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [[`25749e6`](https://github.com/tencildev/tencil/commit/25749e6d21588ab8a149525e2b957701f1a7c5a6)]:
+  - @tencildev/protocol@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes
