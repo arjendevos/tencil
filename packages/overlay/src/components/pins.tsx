@@ -1,10 +1,12 @@
 import { computed } from '@preact/signals';
 import type { Thread } from '@tencildev/protocol';
-import { send, upsertLocal } from '../lib/connection.ts';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { send, threads, upsertLocal } from '../lib/connection.ts';
 import { buildSelector } from '../lib/element-context.ts';
 import { getHost } from '../lib/overlay-host.ts';
 import { offsetsIn, type Point, resolveAnchor } from '../lib/position.ts';
 import {
+    currentPage,
     draft,
     hidden,
     layoutTick,
@@ -14,6 +16,7 @@ import {
     queuedThreads,
     sortedThreads,
 } from '../lib/state.ts';
+import { CheckIcon } from './icons.tsx';
 
 /** Stable pin numbers: oldest pin is #1, across all pages. */
 export const pinNumbers = computed(() => {
@@ -36,6 +39,7 @@ export function sendQueued(): void {
 }
 
 export function Pins() {
+    const leaving = useLeavingPins();
     if (hidden.value) return null;
     const pending = draft.value;
     return (
@@ -43,8 +47,95 @@ export function Pins() {
             {pageThreads.value.map(thread => (
                 <Pin key={thread.id} thread={thread} />
             ))}
+            {leaving.map(pin => (
+                <LeavingPin key={`leaving:${pin.thread.id}`} pin={pin} />
+            ))}
             {pending && <DraftPin />}
         </>
+    );
+}
+
+/** A pin on its way out: what it looked like on screen, and whether it was resolved. */
+interface Leaving {
+    thread: Thread;
+    number: number | undefined;
+    variant: string;
+    resolved: boolean;
+}
+
+/** How long a leaving pin stays: the check (resolved only), then the dissolve. */
+const LEAVE_MS = 1000;
+
+/**
+ * Pins that left this page while it stayed open (resolved, or deleted), kept on
+ * screen until their exit animation has played. A pin that comes back (reopened,
+ * or "Show resolved" switched on) drops out of the list straight away.
+ */
+function useLeavingPins(): Leaving[] {
+    const visible = pageThreads.value;
+    const page = currentPage.value;
+    const shown = useRef({ page, pins: [] as Leaving[] });
+    const [leaving, setLeaving] = useState<Leaving[]>([]);
+
+    useLayoutEffect(() => {
+        const previous = shown.current;
+        shown.current = {
+            page,
+            pins: visible.map(thread => ({
+                thread,
+                number: pinNumbers.value.get(thread.id),
+                variant: pinVariant(thread),
+                resolved: false,
+            })),
+        };
+        const ids = new Set(visible.map(thread => thread.id));
+        const gone =
+            previous.page === page
+                ? previous.pins
+                      .filter(pin => !ids.has(pin.thread.id))
+                      .map(pin => ({
+                          ...pin,
+                          resolved: threads.value.get(pin.thread.id)?.resolved === true,
+                      }))
+                : [];
+        setLeaving(current => {
+            const stay = current.filter(
+                pin => !ids.has(pin.thread.id) && !gone.some(g => g.thread.id === pin.thread.id),
+            );
+            return stay.length === current.length && gone.length === 0
+                ? current
+                : [...stay, ...gone];
+        });
+        for (const pin of gone) {
+            setTimeout(() => setLeaving(current => current.filter(p => p !== pin)), LEAVE_MS);
+        }
+    }, [visible, page]);
+
+    return leaving;
+}
+
+function LeavingPin({ pin }: { pin: Leaving }) {
+    layoutTick.value;
+    const point = pin.thread.anchor ? resolveAnchor(pin.thread.anchor) : null;
+    if (!point) return null;
+    return (
+        <div
+            class={`pin pin-${pin.variant} pin-leaving${pin.resolved ? ' pin-resolving' : ''}`}
+            style={{ transform: `translate(${point.x}px, ${point.y}px)` }}
+            aria-hidden="true"
+        >
+            <span class="pin-body">
+                <span class="pin-glyph">{pin.number ?? '•'}</span>
+                {pin.resolved && (
+                    <>
+                        <span class="pin-glyph pin-check">
+                            <CheckIcon />
+                        </span>
+                        <span class="pin-shine" />
+                    </>
+                )}
+            </span>
+        </div>
     );
 }
 
@@ -106,7 +197,10 @@ function startPinDrag(event: PointerEvent, thread: Thread, tip: Point): void {
         const dx = moveEvent.clientX - startX;
         const dy = moveEvent.clientY - startY;
         if (!pinDrag.value && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-        pinDrag.value = { threadId: thread.id, point: { x: tip.x + dx, y: tip.y + dy } };
+        pinDrag.value = {
+            threadId: thread.id,
+            point: insidePage({ x: tip.x + dx, y: tip.y + dy }),
+        };
     };
 
     const end = (endEvent: PointerEvent) => {
@@ -130,6 +224,18 @@ function startPinDrag(event: PointerEvent, thread: Thread, tip: Point): void {
     window.addEventListener('dragstart', preventNativeDrag, true);
 }
 
+/**
+ * Keep a dragged tip over the page: past the window's edge or on its scrollbar
+ * there's no element to anchor to, and the pin would jump back on release.
+ */
+function insidePage(point: Point): Point {
+    const { clientWidth, clientHeight } = document.documentElement;
+    return {
+        x: Math.max(0, Math.min(point.x, clientWidth - 1)),
+        y: Math.max(0, Math.min(point.y, clientHeight - 1)),
+    };
+}
+
 function preventNativeDrag(event: DragEvent): void {
     event.preventDefault();
 }
@@ -149,7 +255,9 @@ function pageElementAt(point: Point): Element | null {
     return (
         document
             .elementsFromPoint(point.x, point.y)
-            .find(element => element !== host && element !== document.documentElement) ?? null
+            .find(element => element !== host && element !== document.documentElement) ??
+        // Below a short page there's only <html>; the body is the closest anchor.
+        document.body
     );
 }
 
