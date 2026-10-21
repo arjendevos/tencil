@@ -330,3 +330,136 @@ test("stands beside Next.js's dev tools button in its corner", async ({ page }) 
     });
     await expect(wrap).toHaveCSS('left', '20px');
 });
+
+test('measures spacing with Alt and sends it with the comment', async ({ page }) => {
+    const sent: string[] = [];
+    page.on('websocket', socket =>
+        socket.on('framesent', frame => {
+            if (typeof frame.payload === 'string') sent.push(frame.payload);
+        }),
+    );
+    await openPlayground(page);
+    const card = page.locator('article', { has: page.getByRole('button', { name: 'Choose Pro' }) });
+    const button = card.getByRole('button', { name: 'Choose Pro' });
+
+    // Hovering shows the box model once the ruler is on: the button's padding, the card's gap.
+    await overlay(page).getByRole('button', { name: 'Ruler', exact: true }).click();
+    await overlay(page).locator('.tool[title="Comment (C)"]').click();
+    await button.hover();
+    await expect(overlay(page).locator('.band-value-padding')).toHaveText(['12', '20', '12', '20']);
+    await card.hover({ position: { x: 4, y: 4 } });
+    await expect(overlay(page).locator('.band-value-gap').first()).toHaveText('12');
+
+    // Alt: distances to the parent instead, without moving the mouse.
+    await button.hover();
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.band')).toHaveCount(0);
+    // The card's 1px border plus its 24px padding.
+    await expect(overlay(page).locator('.guide-value').filter({ hasText: /^25$/ })).toHaveCount(3);
+
+    // Alt-click pins it with the spacing to its parent.
+    await button.click({ modifiers: ['Alt'] });
+    await page.keyboard.up('Alt');
+    const measured = overlay(page).locator('.composer-measure');
+    await expect(measured).toContainText('Parent');
+    await expect(measured).toContainText('25 right, 25 below, 25 left');
+
+    // With the comment open, Alt-click another element to measure against it instead.
+    const heading = card.getByRole('heading', { name: 'Pro' });
+    await heading.hover();
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.measure-target')).toHaveCount(1);
+    await heading.click({ modifiers: ['Alt'] });
+    await page.keyboard.up('Alt');
+    await expect(measured).toContainText('h2');
+    await expect(measured).not.toContainText('Parent');
+
+    const composer = overlay(page).locator('.composer textarea');
+    await expect(composer).toBeFocused();
+    await composer.fill('Move the button closer to the heading');
+    await composer.press('Enter');
+
+    await expect
+        .poll(() =>
+            sent.map(text => JSON.parse(text)).find(message => message.type === 'thread.create'),
+        )
+        .toMatchObject({
+            context: {
+                box: { padding: [12, 20, 12, 20] },
+                spacing: { to: expect.stringContaining('h2'), top: expect.any(Number) },
+            },
+        });
+});
+
+test('starts with the ruler off and hides it in settings', async ({ page }) => {
+    await openPlayground(page);
+    const ruler = overlay(page).getByRole('button', { name: 'Ruler', exact: true });
+    await expect(ruler).toHaveAttribute('aria-pressed', 'false');
+
+    // Off: picking shows a plain highlight, and Alt measures nothing.
+    await page.keyboard.press('c');
+    await page.getByRole('button', { name: 'Choose Pro' }).hover();
+    await expect(overlay(page).locator('.highlight')).toBeVisible();
+    await expect(overlay(page).locator('.band')).toHaveCount(0);
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.guide')).toHaveCount(0);
+    await page.keyboard.up('Alt');
+    await page.keyboard.press('Escape');
+
+    // Turned on (R), it stays on across reloads.
+    await page.keyboard.press('r');
+    await expect(ruler).toHaveAttribute('aria-pressed', 'true');
+    await page.reload();
+    await expect(ruler).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
+
+    // The project setting takes the button away altogether.
+    await overlay(page).locator('.tool[title="Project settings"]').click();
+    const setting = overlay(page).getByRole('switch', { name: /Ruler/ });
+    await expect(setting).toBeChecked();
+    await setting.click();
+    await expect(ruler).toHaveCount(0);
+    await setting.click();
+    await expect(ruler).toHaveCount(1);
+});
+
+test('measures with Alt outside comment mode and comments on the selection', async ({ page }) => {
+    const sent: string[] = [];
+    page.on('websocket', socket =>
+        socket.on('framesent', frame => {
+            if (typeof frame.payload === 'string') sent.push(frame.payload);
+        }),
+    );
+    await openPlayground(page);
+    await overlay(page).getByRole('button', { name: 'Ruler', exact: true }).click();
+    const card = page.locator('article', { has: page.getByRole('button', { name: 'Choose Pro' }) });
+    const button = card.getByRole('button', { name: 'Choose Pro' });
+
+    // Without comment mode: nothing until Alt, then the box model and distances to the parent.
+    await button.hover();
+    await expect(overlay(page).locator('.highlight')).toHaveCount(0);
+    await page.keyboard.down('Alt');
+    await expect(overlay(page).locator('.band-value-padding')).toHaveText(['12', '20', '12', '20']);
+    await expect(overlay(page).locator('.guide-value').filter({ hasText: /^25$/ })).toHaveCount(3);
+
+    // Alt-click selects the button to measure from; Alt-hover measures to the heading.
+    await button.click({ modifiers: ['Alt'] });
+    await expect(overlay(page).locator('.measure-box')).toHaveCount(1);
+    await card.getByRole('heading', { name: 'Pro' }).hover();
+    await expect(overlay(page).locator('.measure-target')).toHaveCount(1);
+    await page.keyboard.up('Alt');
+    await expect(overlay(page).locator('.toolbar-hint')).toContainText('C to comment');
+
+    // C comments on the selection, with the spacing it measured.
+    await page.keyboard.press('c');
+    await expect(overlay(page).locator('.composer-measure')).toContainText('h2');
+    const composer = overlay(page).locator('.composer textarea');
+    await composer.fill('Tighten the space above the button');
+    await composer.press('Enter');
+    await expect
+        .poll(() =>
+            sent.map(text => JSON.parse(text)).find(message => message.type === 'thread.create'),
+        )
+        .toMatchObject({
+            context: { tagName: 'button', spacing: { to: expect.stringContaining('h2') } },
+        });
+});

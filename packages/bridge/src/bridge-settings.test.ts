@@ -150,6 +150,14 @@ describe('project settings', () => {
         expect(received.at(-1)).toMatchObject({ settings: { batch: true } });
     });
 
+    it('offers the ruler unless the project hides it', async () => {
+        const { bridge, client, received } = setup();
+        await bridge.handle(client, { type: 'hello', protocol: 1, pageUrl: 'http://x/' });
+        expect(received.at(-1)).toMatchObject({ settings: { ruler: true } });
+        await bridge.handle(client, { type: 'settings.update', ruler: false });
+        expect(received.at(-1)).toMatchObject({ settings: { ruler: false, batch: true } });
+    });
+
     it('refuses an unknown provider', async () => {
         const { bridge, client, received } = setup();
         await bridge.handle(client, { type: 'settings.update', provider: 'nope' });

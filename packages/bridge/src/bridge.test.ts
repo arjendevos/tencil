@@ -52,6 +52,34 @@ describe('prompt', () => {
         expect(text).toContain('‹/tencil-context>');
         expect(text.length).toBeLessThan(4000);
     });
+
+    it('lists the box model and the spacing measured with Alt', () => {
+        const text = renderPrompt({
+            prompt: 'Make this 8px tighter',
+            pageUrl: 'http://localhost:3000/',
+            context: {
+                ...context,
+                box: {
+                    margin: [0, 0, 24, 0],
+                    padding: [12, 16, 12, 16],
+                    border: [0, 0, 0, 0],
+                    gap: { row: 8, column: 8 },
+                },
+                spacing: {
+                    to: 'PricingCard · article',
+                    selector: 'article',
+                    parent: true,
+                    top: 24,
+                    left: 16.5,
+                },
+            },
+            hasScreenshot: false,
+        });
+        expect(text).toContain('- Box: padding 12 16, margin 0 0 24, gap 8 (px)');
+        expect(text).toContain(
+            '- Measured spacing to its parent `PricingCard · article` (`article`): 24px above, 16.5px left',
+        );
+    });
 });
 
 describe('batch prompt', () => {

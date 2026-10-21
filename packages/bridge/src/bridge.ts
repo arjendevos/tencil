@@ -134,6 +134,7 @@ export class Bridge {
                     const { providers } = this.#options;
                     if (message.provider) await providers.setDefault(message.provider);
                     if (message.batch !== undefined) await providers.setBatch(message.batch);
+                    if (message.ruler !== undefined) await providers.setRuler(message.ruler);
                     return;
                 }
                 case 'provider.models': {
@@ -537,6 +538,7 @@ export class Bridge {
             providers: providers.choices,
             ...(model ? { model } : {}),
             batch: providers.batch,
+            ruler: providers.ruler,
         };
     }
 

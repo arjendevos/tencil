@@ -1,6 +1,7 @@
 import type { ComponentFrame, ElementContext } from '@tencildev/protocol';
 import { getDisplayName, getFiberFromHostInstance, isCompositeFiber, traverseFiber } from 'bippy';
 import { getOwnerStack, getRawOwnerStack, isSourceFile } from 'bippy/source';
+import { boxModel } from './measure.ts';
 
 const MAX_FRAMES = 6;
 const SOURCE_TIMEOUT_MS = 1500;
@@ -8,12 +9,15 @@ const SOURCE_TIMEOUT_MS = 1500;
 export async function captureContext(element: Element): Promise<ElementContext> {
     const rect = element.getBoundingClientRect();
     const selection = window.getSelection()?.toString().trim();
+    // Read before the first await, while the layout is what the user saw.
+    const box = boxModel(element);
     return {
         tagName: element.tagName.toLowerCase(),
         selector: buildSelector(element),
         html: htmlPreview(element),
         text: visibleText(element),
         components: await componentFrames(element),
+        box,
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         viewport: {
             width: window.innerWidth,

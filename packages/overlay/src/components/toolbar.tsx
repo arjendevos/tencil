@@ -12,15 +12,22 @@ import {
     send,
 } from '../lib/connection.ts';
 import { dock, moveDockBy, startDrag } from '../lib/dock.ts';
+import { ALT_KEY } from '../lib/measure.ts';
 import { besideIndicator, nextIndicator } from '../lib/next-devtools.ts';
 import {
+    draft,
     hidden,
     inboxOpen,
     mode,
     queuedThreads,
+    rulerAnchor,
+    rulerAvailable,
+    rulerOn,
+    rulerToggle,
     settingsOpen,
     startPicking,
     stopPicking,
+    toggleRuler,
     unresolvedCount,
 } from '../lib/state.ts';
 import {
@@ -29,6 +36,8 @@ import {
     EyeIcon,
     EyeOffIcon,
     InboxIcon,
+    RulerIcon,
+    RulerOffIcon,
     SettingsIcon,
 } from './icons.tsx';
 import { sendQueued } from './pins.tsx';
@@ -48,7 +57,10 @@ export function Toolbar() {
             style={besideIndicator(dock.value, nextIndicator.value)}
         >
             {picking && (
-                <div class="toolbar-hint">Click any element to pin a prompt · Esc to cancel</div>
+                <div class="toolbar-hint">
+                    Click any element to pin a prompt
+                    {rulerOn.value && ` · ${ALT_KEY} to measure`} · Esc to cancel
+                </div>
             )}
             {/* Sits on the toolbar's open side, so it follows the toolbar to any corner. */}
             {!picking && <SettingsPanel />}
@@ -61,6 +73,11 @@ export function Toolbar() {
                             {status.action.label}
                         </button>
                     )}
+                </div>
+            )}
+            {!picking && !status.hint && rulerAnchor.value && !draft.value && (
+                <div class="toolbar-hint">
+                    Hold {ALT_KEY} and hover to measure · C to comment · Esc to clear
                 </div>
             )}
             <div class="toolbar">
@@ -87,6 +104,22 @@ export function Toolbar() {
                     <span class="tool-label">Comment</span>
                     <kbd>C</kbd>
                 </button>
+                {rulerAvailable.value && (
+                    <button
+                        type="button"
+                        class={`tool${rulerToggle.value ? '' : ' tool-off'}`}
+                        title={
+                            rulerToggle.value
+                                ? `Ruler on (R): hold ${ALT_KEY} to measure`
+                                : 'Ruler off (R)'
+                        }
+                        aria-label="Ruler"
+                        aria-pressed={rulerToggle.value}
+                        onClick={toggleRuler}
+                    >
+                        {rulerToggle.value ? <RulerIcon /> : <RulerOffIcon />}
+                    </button>
+                )}
                 {queuedThreads.value.length > 0 && (
                     <button
                         type="button"

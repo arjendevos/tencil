@@ -4,6 +4,7 @@ import { mode, openThreadId } from '../lib/state.ts';
 import { Composer } from './composer.tsx';
 import { Highlight } from './highlight.tsx';
 import { Inbox, PENDING_OPEN_KEY, revealAnchor } from './inbox.tsx';
+import { MeasureGuides } from './measure-guides.tsx';
 import { Pins } from './pins.tsx';
 import { ThreadPanel } from './thread-panel.tsx';
 import { Toolbar } from './toolbar.tsx';
@@ -13,6 +14,7 @@ export function App() {
     return (
         <div class={`root${mode.value === 'picking' ? ' picking' : ''}`}>
             <Highlight />
+            <MeasureGuides />
             <Pins />
             <Composer />
             <ThreadPanel />

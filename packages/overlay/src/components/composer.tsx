@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals';
 import type {
+    ElementContext,
     ImageAttachment,
     ProviderModel,
     ProviderThreadSummary,
@@ -17,7 +18,9 @@ import {
     settings,
     upsertLocal,
 } from '../lib/connection.ts';
+import { buildSelector } from '../lib/element-context.ts';
 import { newId } from '../lib/id.ts';
+import { boxOf, measureBetween, toSpacing } from '../lib/measure.ts';
 import { getHost } from '../lib/overlay-host.ts';
 import { popoverPosition, resolveAnchor } from '../lib/position.ts';
 import { captureElement } from '../lib/screenshot.ts';
@@ -25,14 +28,16 @@ import {
     batchAvailable,
     batchMode,
     batchToggle,
+    type Draft,
     draft,
     layoutTick,
     openThreadId,
     queuedThreads,
+    rulerOn,
     startPicking,
 } from '../lib/state.ts';
 import { AgentIcon } from './agent-icons.tsx';
-import { CameraIcon, ChevronIcon, CodeIcon, LayersIcon } from './icons.tsx';
+import { CameraIcon, ChevronIcon, CloseIcon, CodeIcon, LayersIcon } from './icons.tsx';
 import { timeAgo } from './inbox.tsx';
 import { PromptInput } from './prompt-input.tsx';
 
@@ -84,7 +89,7 @@ export function Composer() {
     const submit = async (prompt: string) => {
         setBusy(true);
         try {
-            const context = await pending.context;
+            const context = withSpacing(await pending.context, pending);
             const attachments: ImageAttachment[] = [];
             if (withScreenshot) {
                 const shot = await captureElement(pending.element, getHost());
@@ -174,6 +179,7 @@ export function Composer() {
                     </button>
                 )}
             </div>
+            {pending.measuredTo && rulerOn.value && <MeasuredTo pending={pending} />}
             {menu === 'target' && !batching && (
                 <TargetMenu
                     onPick={summary => {
@@ -256,6 +262,67 @@ export function Composer() {
             {!ready && target?.detail && <p class="hint">{target.detail}</p>}
         </div>
     );
+}
+
+const SIDE_WORDS = { top: 'above', right: 'right', bottom: 'below', left: 'left' };
+
+/** The spacing measured with Alt, shown so it's clear what goes along with the comment. */
+function MeasuredTo({ pending }: { pending: Draft }) {
+    const measured = pending.measuredTo!;
+    const spacing = spacingFor(pending);
+    const values = (['top', 'right', 'bottom', 'left'] as const)
+        .filter(side => spacing?.[side] !== undefined)
+        .map(side => `${spacing![side]} ${SIDE_WORDS[side]}`);
+    return (
+        <div class="composer-measure">
+            <span
+                class="composer-measure-label"
+                title={`Spacing to ${measured.label}: ${values.join(', ') || 'none'}`}
+            >
+                ↔ {measured.parent ? 'Parent ' : ''}
+                <span class="composer-measure-target">{measured.label}</span>
+                {values.length > 0 && ` · ${values.join(', ')}`}
+            </span>
+            <button
+                type="button"
+                class="icon-button"
+                title="Don't send the spacing"
+                aria-label="Remove spacing"
+                onClick={() => {
+                    if (draft.value) draft.value = { ...draft.value, measuredTo: undefined };
+                }}
+            >
+                <CloseIcon />
+            </button>
+        </div>
+    );
+}
+
+/** Measured now, so the agent gets the layout as it is when the comment is sent. */
+function spacingFor(pending: Draft): ElementContext['spacing'] {
+    const measured = pending.measuredTo;
+    // Turning the ruler off drops what was measured.
+    if (
+        !measured ||
+        !rulerOn.value ||
+        !pending.element.isConnected ||
+        !measured.element.isConnected
+    )
+        return;
+    const guides = measureBetween(
+        boxOf(pending.element.getBoundingClientRect()),
+        boxOf(measured.element.getBoundingClientRect()),
+    );
+    return toSpacing(guides, {
+        to: measured.label,
+        selector: buildSelector(measured.element),
+        ...(measured.parent ? { parent: true } : {}),
+    });
+}
+
+function withSpacing(context: ElementContext, pending: Draft): ElementContext {
+    const spacing = spacingFor(pending);
+    return spacing ? { ...context, spacing } : context;
 }
 
 interface ModelChoices {

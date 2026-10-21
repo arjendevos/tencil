@@ -8,6 +8,8 @@ export interface SavedProjectSettings {
     models?: Record<string, string>;
     /** Queue new comments and send them together; on when unset. */
     batch?: boolean;
+    /** Offer the ruler in the overlay's toolbar; on when unset. */
+    ruler?: boolean;
 }
 
 /**
@@ -46,6 +48,8 @@ export class ProjectProviders {
     #models: Record<string, string> = {};
     /** On unless the project turns it off. */
     #batch = true;
+    /** On unless the project turns it off. */
+    #ruler = true;
 
     constructor(options: ProjectProvidersOptions) {
         this.#options = options;
@@ -76,6 +80,7 @@ export class ProjectProviders {
             this.#chosen = saved.provider;
             this.#models = saved.models ?? {};
             this.#batch = saved.batch ?? true;
+            this.#ruler = saved.ruler ?? true;
         }
     }
 
@@ -141,7 +146,18 @@ export class ProjectProviders {
         for (const listener of this.#settingsListeners) listener();
     }
 
-    /** Fires when a picked model or batching changes. */
+    get ruler(): boolean {
+        return this.#ruler;
+    }
+
+    async setRuler(on: boolean): Promise<void> {
+        if (on === this.#ruler) return;
+        this.#ruler = on;
+        await this.#save();
+        for (const listener of this.#settingsListeners) listener();
+    }
+
+    /** Fires when a picked model, batching or the ruler changes. */
     onSettingsChange(listener: () => void): () => void {
         this.#settingsListeners.add(listener);
         return () => this.#settingsListeners.delete(listener);
@@ -162,6 +178,7 @@ export class ProjectProviders {
             provider: this.#chosen,
             models: this.#models,
             batch: this.#batch,
+            ruler: this.#ruler,
         });
     }
 }

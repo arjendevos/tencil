@@ -13,10 +13,22 @@ export interface Draft {
     label: string;
     /** Source maps are fetched lazily, so the full context resolves later. */
     context: Promise<ElementContext>;
+    /** Measured against with Alt: the pin's context gets the spacing to it. */
+    measuredTo?: { element: Element; label: string; parent: boolean };
 }
 
 export const mode = signal<Mode>('idle');
 export const hovered = signal<Element | null>(null);
+/** Alt is held: hovering measures distances instead of showing the box model. */
+export const measuring = signal(false);
+/**
+ * The ruler outside comment mode: Alt-click selects an element to measure
+ * from, and `C` comments on it. `offsets` is where it was clicked, for the pin.
+ */
+export const rulerAnchor = signal<{
+    element: Element;
+    offsets: Pick<Anchor, 'offsetX' | 'offsetY'>;
+} | null>(null);
 export const draft = signal<Draft | null>(null);
 export const openThreadId = signal<string | null>(null);
 export const inboxOpen = signal(false);
@@ -35,6 +47,43 @@ export function setBatchAvailable(on: boolean): void {
     if (!current || !send({ type: 'settings.update', batch: on })) return;
     // Flip right away; the daemon's settings broadcast confirms it.
     settings.value = { ...current, batch: on };
+}
+
+const RULER_KEY = 'tencil:ruler';
+
+/** The project offers the ruler: the toolbar then has a ruler toggle. */
+export const rulerAvailable = computed(() => {
+    const current = settings.value;
+    // A bridge from before the setting leaves it out: offer the ruler.
+    return current !== null && current.ruler !== false;
+});
+/** The toolbar's ruler toggle. Remembered per browser, off until turned on. */
+export const rulerToggle = signal(readRuler());
+/** Picking shows the box model, and Alt measures distances. */
+export const rulerOn = computed(() => rulerAvailable.value && rulerToggle.value);
+
+export function setRulerAvailable(on: boolean): void {
+    const current = settings.value;
+    if (!current || !send({ type: 'settings.update', ruler: on })) return;
+    settings.value = { ...current, ruler: on };
+}
+
+export function toggleRuler(): void {
+    rulerToggle.value = !rulerToggle.value;
+    rulerAnchor.value = null;
+    try {
+        localStorage.setItem(RULER_KEY, rulerToggle.value ? 'on' : 'off');
+    } catch {
+        // Storage can be blocked; the choice just won't persist.
+    }
+}
+
+function readRuler(): boolean {
+    try {
+        return localStorage.getItem(RULER_KEY) === 'on';
+    } catch {
+        return false;
+    }
 }
 /** A pin being dragged: where its tip is now, so its open thread can follow. */
 export const pinDrag = signal<{ threadId: string; point: Point } | null>(null);
@@ -87,6 +136,7 @@ export const activeCount = computed(
 export function startPicking(): void {
     if (pinBlocked.value) return;
     draft.value = null;
+    rulerAnchor.value = null;
     openThreadId.value = null;
     mode.value = 'picking';
 }

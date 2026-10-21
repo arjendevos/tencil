@@ -33,11 +33,13 @@ describe('FileProjectSettings', () => {
         await providers.setDefault('claude-code');
         await providers.setModel('t3code', 'claudeAgent/claude-opus-5-5');
         await providers.setBatch(false);
+        await providers.setRuler(false);
         expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
             version: 1,
             provider: 'claude-code',
             models: { t3code: 'claudeAgent/claude-opus-5-5' },
             batch: false,
+            ruler: false,
         });
 
         const reloaded = setup(path).providers;
@@ -45,6 +47,7 @@ describe('FileProjectSettings', () => {
         expect(reloaded.defaultId).toBe('claude-code');
         expect(reloaded.modelFor('t3code')).toBe('claudeAgent/claude-opus-5-5');
         expect(reloaded.batch).toBe(false);
+        expect(reloaded.ruler).toBe(false);
     });
 
     it('starts from the defaults without a file', async () => {
@@ -52,5 +55,6 @@ describe('FileProjectSettings', () => {
         await providers.load();
         expect(providers.defaultId).toBe('t3code');
         expect(providers.batch).toBe(true);
+        expect(providers.ruler).toBe(true);
     });
 });

@@ -1,4 +1,4 @@
-import type { ElementContext } from '@tencildev/protocol';
+import type { BoxModel, ElementContext, Sides, Spacing } from '@tencildev/protocol';
 
 const CONTEXT_OPEN = '<tencil-context>';
 const CONTEXT_CLOSE = '</tencil-context>';
@@ -70,7 +70,41 @@ function contextLines(pageUrl: string, context: ElementContext): string[] {
     lines.push(
         `- Layout: ${Math.round(rect.width)}×${Math.round(rect.height)} at (${Math.round(rect.x)}, ${Math.round(rect.y)}) in a ${viewport.width}×${viewport.height} viewport @${viewport.dpr}x`,
     );
+    const box = context.box && boxLine(context.box);
+    if (box) lines.push(`- Box: ${box}`);
+    if (context.spacing) lines.push(spacingLine(context.spacing));
     return lines;
+}
+
+/** Computed spacing in CSS shorthand, px: `padding 12 16, margin 0 0 24, gap 8`. */
+function boxLine(box: BoxModel): string | undefined {
+    const parts: string[] = [];
+    for (const kind of ['padding', 'margin', 'border'] as const) {
+        if (box[kind].some(value => value !== 0)) parts.push(`${kind} ${shorthand(box[kind])}`);
+    }
+    if (box.gap) {
+        const { row, column } = box.gap;
+        parts.push(`gap ${row === column ? row : `${row} ${column}`}`);
+    }
+    return parts.length > 0 ? `${parts.join(', ')} (px)` : undefined;
+}
+
+function shorthand([top, right, bottom, left]: Sides): string {
+    if (left !== right) return `${top} ${right} ${bottom} ${left}`;
+    if (top !== bottom) return `${top} ${right} ${bottom}`;
+    return top === right ? `${top}` : `${top} ${right}`;
+}
+
+const SIDE_WORDS = { top: 'above', right: 'right', bottom: 'below', left: 'left' };
+
+/** What the user measured with Alt: the space on each side of the element. */
+function spacingLine(spacing: Spacing): string {
+    const sides = (['top', 'right', 'bottom', 'left'] as const)
+        .filter(side => spacing[side] !== undefined)
+        .map(side => `${spacing[side]}px ${SIDE_WORDS[side]}`);
+    const target = `${spacing.parent ? 'its parent ' : ''}\`${page(truncate(spacing.to, 200))}\``;
+    const selector = spacing.selector ? ` (\`${page(truncate(spacing.selector, 500))}\`)` : '';
+    return `- Measured spacing to ${target}${selector}: ${sides.length > 0 ? sides.join(', ') : 'none'}`;
 }
 
 export function stripContext(text: string): string {

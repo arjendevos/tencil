@@ -107,6 +107,7 @@ export const ClientMessage = z.discriminatedUnion('type', [
         type: z.literal('settings.update'),
         provider: z.string().min(1).optional(),
         batch: z.boolean().optional(),
+        ruler: z.boolean().optional(),
     }),
     /** Run new threads of the default provider on this model; null goes back to its default. */
     z.object({ type: z.literal('model.select'), model: z.string().min(1).nullable() }),
@@ -141,6 +142,8 @@ export const ProjectSettings = z.object({
     model: z.string().optional(),
     /** New comments are queued and sent together. */
     batch: z.boolean(),
+    /** The toolbar offers the ruler: spacing while picking, distances with Alt. */
+    ruler: z.boolean(),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettings>;
 
