@@ -1,5 +1,15 @@
 # tencil
 
+## 0.6.1
+
+### Patch Changes
+
+- [#4](https://github.com/tencildev/tencil/pull/4) [`efe0d88`](https://github.com/tencildev/tencil/commit/efe0d8857d4216ee01540e8894945d1b51ecbf55) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - A new pin blooms out of the element you clicked. A resolved pin turns into a check and dissolves instead of disappearing at once.
+
+- [#2](https://github.com/tencildev/tencil/pull/2) [`a722845`](https://github.com/tencildev/tencil/commit/a7228451433dc41a63eb0eaffa458e3e3950db71) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - T3 Code 0.1.0: pins show "Waiting for approval" only while T3 Code is actually waiting on you (it used to flash after every reply and miss real approvals), and "Waiting for your answer" when the agent asks a question.
+
+- [#4](https://github.com/tencildev/tencil/pull/4) [`dc03ecf`](https://github.com/tencildev/tencil/commit/dc03ecf99a4dffc826d42d822d5f519334944bf2) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - A working pin now looks like the Tencil logo, with a light travelling round its edge instead of a spinning ring.
+
 ## 0.6.0
 
 ### Minor Changes
