@@ -1,5 +1,13 @@
 # @tencildev/protocol
 
+## 0.4.0
+
+### Minor Changes
+
+- [#9](https://github.com/tencildev/tencil/pull/9) [`ca2b067`](https://github.com/tencildev/tencil/commit/ca2b067663d4ca552fd24d8bf48fbf5f41b29500) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - Find a page's project from the repository the Vite plugin or `withTencil` runs in, so pages served by something other than a Node process in the project (Laravel on Sail or Herd, a backend behind a proxy) no longer ask "Which project is this page?". The loader passes the git root (`tencil.js?root=…`), the overlay sends it with `hello` (`root`), and the daemon uses it when it holds a `.git` folder or file, after the address's remembered choice and before the port lookup. In Next.js this needs `withTencil` in `next.config`. The plain `<script>` tag keeps the port lookup.
+
+- [#10](https://github.com/tencildev/tencil/pull/10) [`f205605`](https://github.com/tencildev/tencil/commit/f2056058b7cb2fed6e3dd8571ace61aadd818c0e) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - Updates: `ready` can carry an `UpdateStatus` (`update`), pushed again as an `update` message, and the overlay sends `update.start`. The bridge takes an `update` option for it; without one (Tencil Cloud) it leaves the field out and refuses `update.start`. `@tencildev/testing` adds `FakeRegistry`, a stand-in npm registry.
+
 ## 0.3.0
 
 ### Minor Changes
