@@ -23,7 +23,10 @@ export function Tencil({
     port?: number;
     cloud?: TencilCloudOptions;
 }) {
-    if (process.env.NODE_ENV === 'development') return script(overlayLoader(port));
+    if (process.env.NODE_ENV === 'development') {
+        // Set by `withTencil` in next.config; Next inlines it into both bundles.
+        return script(overlayLoader(port, process.env.TENCIL_ROOT));
+    }
     // In a browser bundle `process.env` holds only what the bundler inlined.
     const resolved = resolveCloudBuild(typeof process === 'undefined' ? {} : process.env, cloud);
     if (resolved.kind === 'refused' && !warned) {

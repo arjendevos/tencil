@@ -43,10 +43,13 @@ let retry = 500;
 let bridgeUrl = '';
 /** Set on Tencil Cloud builds, sent with every `hello`. */
 let pageBuild: BuildInfo | undefined;
+/** Repository root from the Vite or Next loader, so the daemon can find the project. */
+let pageRoot: string | undefined;
 
-export function connect(url: string, build?: BuildInfo): void {
+export function connect(url: string, build?: BuildInfo, root?: string): void {
     bridgeUrl = url;
     pageBuild = build;
+    pageRoot = root;
     open();
 }
 
@@ -111,6 +114,7 @@ function open(): void {
                 type: 'hello',
                 protocol: 1,
                 pageUrl: location.href,
+                ...(pageRoot && { root: pageRoot }),
                 ...(pageBuild && { build: pageBuild }),
                 ...(sentToken && { token: sentToken }),
             }),

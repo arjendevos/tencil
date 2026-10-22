@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { overlayLoader } from './loader.ts';
 import { Tencil } from './react.ts';
+import { repositoryRoot } from './source-attributes.ts';
 import tencil from './vite.ts';
 
 afterEach(() => {
@@ -32,6 +33,17 @@ describe('vite plugin', () => {
         expect(
             plugin.transform('client();', '/app/node_modules/vite/dist/client/client.mjs'),
         ).toContain(overlayLoader(4800));
+    });
+
+    it('tells the daemon the repository root in development', () => {
+        const plugin = tencil({ port: 4800 });
+        plugin.apply({}, { command: 'serve' });
+        plugin.configResolved({ root: process.cwd() });
+        const root = repositoryRoot(process.cwd());
+        expect(plugin.transformIndexHtml()[0]?.children).toBe(overlayLoader(4800, root));
+        expect(
+            plugin.transform('client();', '/app/node_modules/vite/dist/client/client.mjs'),
+        ).toContain(`tencil.js?root=${encodeURIComponent(root)}`);
     });
 
     it('stays out of builds without TENCIL_CLOUD', () => {
@@ -68,6 +80,7 @@ describe('vite plugin', () => {
 describe('<Tencil />', () => {
     it('renders the inline loader in development only', () => {
         vi.stubEnv('NODE_ENV', 'development');
+        vi.stubEnv('TENCIL_ROOT', '');
         const element = Tencil({ port: 4800 });
         expect(element?.type).toBe('script');
         expect(element?.props).toMatchObject({
@@ -77,6 +90,14 @@ describe('<Tencil />', () => {
         vi.stubEnv('NODE_ENV', 'production');
         vi.stubEnv('TENCIL_CLOUD', '');
         expect(Tencil({})).toBeNull();
+    });
+
+    it('passes on the repository root withTencil set', () => {
+        vi.stubEnv('NODE_ENV', 'development');
+        vi.stubEnv('TENCIL_ROOT', '/Users/me/Code/shop');
+        expect(Tencil({})?.props.dangerouslySetInnerHTML.__html).toBe(
+            overlayLoader(4747, '/Users/me/Code/shop'),
+        );
     });
 
     it('loads Tencil Cloud on a preview deployment, never in production', () => {

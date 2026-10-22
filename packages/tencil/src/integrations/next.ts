@@ -1,10 +1,12 @@
 import { fileURLToPath } from 'node:url';
 import { resolveCloudBuild, type TencilCloudOptions } from './cloud.ts';
+import { repositoryRoot } from './source-attributes.ts';
 
 /** The parts of Next's config this touches, so `next` stays an optional peer. */
 interface NextConfigParts {
     turbopack?: { rules?: Record<string, unknown>; [key: string]: unknown };
     webpack?: (config: WebpackConfig, context: unknown) => WebpackConfig;
+    env?: Record<string, string | undefined>;
     [key: string]: unknown;
 }
 
@@ -16,8 +18,11 @@ interface WebpackConfig {
 /**
  * Wrap `next.config` for Tencil Cloud preview builds: every element gets a
  * `data-tencil-src` attribute with its file and line, because production React
- * keeps no source info. Without TENCIL_CLOUD, in development and on production
- * deployments the config comes back untouched.
+ * keeps no source info. Without TENCIL_CLOUD, on production deployments the
+ * config comes back untouched.
+ *
+ * In development it hands `<Tencil />` the repository root (TENCIL_ROOT), so
+ * the daemon finds the project even when the page isn't served by Next itself.
  *
  *   export default withTencil(nextConfig);
  */
@@ -25,7 +30,11 @@ export function withTencil<T extends object>(
     config: T = {} as T,
     options: { cloud?: TencilCloudOptions } = {},
 ): T {
-    if (process.env.NODE_ENV === 'development') return config;
+    if (process.env.NODE_ENV === 'development') {
+        const parts = config as NextConfigParts;
+        const env = { ...parts.env, TENCIL_ROOT: repositoryRoot(process.cwd()) };
+        return { ...parts, env } as T;
+    }
     if (resolveCloudBuild(process.env, options.cloud).kind !== 'on') return config;
     return addSourceLoader(config as NextConfigParts) as T;
 }

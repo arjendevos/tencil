@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readlink, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -15,7 +15,8 @@ const defaultExec: Exec = async (command, args) =>
 /**
  * Works out which project folder a page belongs to:
  *   1. what the user picked for this address before,
- *   2. the dev server's working directory, found from the port it listens on.
+ *   2. the repository root the Vite or Next loader sent, if it's a git checkout,
+ *   3. the dev server's working directory, found from the port it listens on.
  * Returns undefined when neither works; the overlay then asks.
  */
 export class ProjectResolver {
@@ -29,11 +30,12 @@ export class ProjectResolver {
         this.#platform = options.platform ?? process.platform;
     }
 
-    async resolve(pageUrl: string): Promise<string | undefined> {
+    async resolve(pageUrl: string, claimedRoot?: string): Promise<string | undefined> {
         const origin = safeOrigin(pageUrl);
         if (!origin) return undefined;
         const remembered = await this.#memory.get(origin);
         if (remembered && existsSync(remembered)) return remembered;
+        if (claimedRoot && isGitRoot(claimedRoot)) return resolve(claimedRoot);
         const port = portOf(origin);
         if (!port) return undefined;
         const folder = await this.folderForPort(port).catch(() => undefined);
@@ -111,6 +113,15 @@ export class ProjectResolver {
         }
         return this.#exec('ps', ['-o', 'command=', '-p', String(pid)]);
     }
+}
+
+/**
+ * A folder with `.git` in it: a checkout, or a worktree (where `.git` is a
+ * file). Any local page can claim a root, so only accept a real repository;
+ * that's the same trust as picking it in the overlay.
+ */
+export function isGitRoot(folder: string): boolean {
+    return isAbsolute(folder) && existsSync(join(folder, '.git'));
 }
 
 /** Closest folder with a package.json at or above `folder`, or `folder` itself. */
