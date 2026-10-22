@@ -25,7 +25,7 @@ Then `chrome://extensions` → Developer mode → Load unpacked → `apps/extens
   current page only.
 - The badge shows `ON`, or `!` when the daemon isn't running.
 - The icons in `public/` are `icon.svg` (the Tencil mark, as on tencil.dev) rendered at 16, 32, 48
-  and 128 px.
+  and 128 px (the 128 one with the store's 16 px border).
 
 Limits: a strict `connect-src` CSP still blocks the overlay's connection to the
 daemon. Sites that aren't on localhost need `tencil start --allow-origin <origin>`, and
