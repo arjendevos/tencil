@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
     type Exec,
+    isDockerForwarder,
     ProjectResolver,
     parseLsofCwd,
     parseNetstat,
@@ -67,6 +68,32 @@ describe('output parsing', () => {
         expect(projectFromCommandLine('next-server (v16.3.6)')).toBeUndefined();
     });
 
+    it("recognises Docker's port forwarders", () => {
+        expect(
+            isDockerForwarder(
+                '/Applications/Docker.app/Contents/MacOS/com.docker.backend services',
+            ),
+        ).toBe(true);
+        expect(
+            isDockerForwarder(
+                '/usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 8130 -container-ip 172.18.0.3 -container-port 80',
+            ),
+        ).toBe(true);
+        expect(
+            isDockerForwarder(
+                '"C:\\Program Files\\Docker\\Docker\\resources\\com.docker.backend.exe"',
+            ),
+        ).toBe(true);
+        expect(
+            isDockerForwarder(
+                '/Applications/OrbStack.app/Contents/Frameworks/OrbStack Helper.app/Contents/MacOS/OrbStack Helper vmgr',
+            ),
+        ).toBe(true);
+        expect(isDockerForwarder('/opt/homebrew/bin/limactl hostagent colima')).toBe(true);
+        expect(isDockerForwarder('node /Users/me/shop/node_modules/.bin/vite')).toBe(false);
+        expect(isDockerForwarder('/Users/me/bin/docker-proxy-tests')).toBe(false);
+    });
+
     it('walks up to the nearest package.json', () => {
         const { app } = monorepo();
         expect(projectRoot(join(app, 'src'))).toBe(app);
@@ -101,6 +128,101 @@ describe('ProjectResolver', () => {
             platform: 'darwin',
         });
         expect(await resolver.resolve('http://localhost:5173/')).toBe(app);
+    });
+
+    /** A port published by Docker: `ps` shows the forwarder, `docker ps` the compose label. */
+    const dockerExec =
+        (forwarder: string, label: string, calls: string[] = []): Exec =>
+        async (bin, args) => {
+            calls.push(bin);
+            if (bin === 'lsof' && args.includes('-t')) return '50164\n';
+            if (bin === 'lsof') return 'p50164\nfcwd\nn/var/lib/docker\n';
+            if (bin === 'ps') return forwarder;
+            if (bin === 'docker') {
+                expect(args).toEqual([
+                    'ps',
+                    '--filter',
+                    'publish=8130',
+                    '--format',
+                    '{{.Label "com.docker.compose.project.working_dir"}}',
+                ]);
+                return `${label}\n`;
+            }
+            throw new Error(`unexpected ${bin}`);
+        };
+
+    it('maps a port published by Docker Desktop to the compose project', async () => {
+        const { app } = monorepo();
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: dockerExec(
+                '/Applications/Docker.app/Contents/MacOS/com.docker.backend services',
+                app,
+            ),
+            platform: 'darwin',
+        });
+        expect(await resolver.resolve('http://localhost:8130/')).toBe(app);
+    });
+
+    it('maps a port published through docker-proxy to the compose project', async () => {
+        const { app } = monorepo();
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: dockerExec('/usr/bin/docker-proxy -proto tcp -host-port 8130', app),
+            platform: 'darwin',
+        });
+        expect(await resolver.resolve('http://localhost:8130/')).toBe(app);
+    });
+
+    it("asks Docker on Linux when root's docker-proxy is hidden from lsof", async () => {
+        const { app } = monorepo();
+        const exec: Exec = async (bin, args) => {
+            if (bin === 'lsof') return '';
+            return dockerExec('', app)(bin, args);
+        };
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec,
+            platform: 'linux',
+        });
+        expect(await resolver.resolve('http://localhost:8130/')).toBe(app);
+    });
+
+    it('returns nothing for a container without compose labels, or without Docker', async () => {
+        const forwarder = '/usr/bin/docker-proxy -proto tcp -host-port 8130';
+        const unlabelled = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: dockerExec(forwarder, ''),
+            platform: 'linux',
+        });
+        expect(await unlabelled.resolve('http://localhost:8130/')).toBeUndefined();
+
+        const noDocker: Exec = async (bin, args) => {
+            if (bin === 'docker') throw new Error('spawn docker ENOENT');
+            return dockerExec(forwarder, '')(bin, args);
+        };
+        const missing = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: noDocker,
+            platform: 'darwin',
+        });
+        expect(await missing.resolve('http://localhost:8130/')).toBeUndefined();
+    });
+
+    it("doesn't ask Docker about an ordinary dev server", async () => {
+        const { app } = monorepo();
+        const calls: string[] = [];
+        const exec: Exec = async (bin, args) => {
+            calls.push(bin);
+            return fakeExec(app)(bin, args);
+        };
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec,
+            platform: 'darwin',
+        });
+        expect(await resolver.resolve('http://localhost:5173/')).toBe(app);
+        expect(calls).not.toContain('docker');
     });
 
     it('returns nothing when no process can be found, and remembers picks', async () => {
