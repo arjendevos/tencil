@@ -1,5 +1,16 @@
 # @tencildev/bridge
 
+## 0.4.0
+
+### Minor Changes
+
+- [#10](https://github.com/tencildev/tencil/pull/10) [`f205605`](https://github.com/tencildev/tencil/commit/f2056058b7cb2fed6e3dd8571ace61aadd818c0e) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - Updates: `ready` can carry an `UpdateStatus` (`update`), pushed again as an `update` message, and the overlay sends `update.start`. The bridge takes an `update` option for it; without one (Tencil Cloud) it leaves the field out and refuses `update.start`. `@tencildev/testing` adds `FakeRegistry`, a stand-in npm registry.
+
+### Patch Changes
+
+- Updated dependencies [[`ca2b067`](https://github.com/tencildev/tencil/commit/ca2b067663d4ca552fd24d8bf48fbf5f41b29500), [`f205605`](https://github.com/tencildev/tencil/commit/f2056058b7cb2fed6e3dd8571ace61aadd818c0e)]:
+  - @tencildev/protocol@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

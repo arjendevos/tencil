@@ -1,5 +1,17 @@
 # tencil
 
+## 0.8.0
+
+### Minor Changes
+
+- [#10](https://github.com/tencildev/tencil/pull/10) [`ddddde6`](https://github.com/tencildev/tencil/commit/ddddde6bfdafce967480ae3d81201c2e2f8cf68b) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - The daemon looks for a new Tencil on start and about once a day, and the overlay's settings show the running version. When a newer one is out, they say so (with a dot on the settings button) and offer **Update**: the daemon installs it into its runtime copy, waits for running threads to finish and restarts on it, through the login service or in the background. If the new version doesn't start, the old one keeps running and the overlay shows why, with `npx tencil@latest setup` to copy. `TENCIL_NO_UPDATE_CHECK=1` (and CI) turns the checks off.
+
+### Patch Changes
+
+- [#8](https://github.com/tencildev/tencil/pull/8) [`faf871b`](https://github.com/tencildev/tencil/commit/faf871b4207d633bef02eb912e41d70ceb038f7f) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - Find the project of a dev server running in Docker. When a page's port is published by Docker (Docker Desktop, docker-proxy, OrbStack, Colima, Podman), the daemon asks Docker for the compose project's folder instead of showing the project picker.
+
+- [#9](https://github.com/tencildev/tencil/pull/9) [`ca2b067`](https://github.com/tencildev/tencil/commit/ca2b067663d4ca552fd24d8bf48fbf5f41b29500) Thanks [@Willem-Jaap](https://github.com/Willem-Jaap)! - Find a page's project from the repository the Vite plugin or `withTencil` runs in, so pages served by something other than a Node process in the project (Laravel on Sail or Herd, a backend behind a proxy) no longer ask "Which project is this page?". The loader passes the git root (`tencil.js?root=…`), the overlay sends it with `hello` (`root`), and the daemon uses it when it holds a `.git` folder or file, after the address's remembered choice and before the port lookup. In Next.js this needs `withTencil` in `next.config`. The plain `<script>` tag keeps the port lookup.
+
 ## 0.7.0
 
 ### Minor Changes
