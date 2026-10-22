@@ -56,7 +56,7 @@ export interface DaemonOptions {
         createProjectIfMissing?: boolean;
     };
     /** Overrides how pages map to projects (tests). */
-    resolveProject?: (pageUrl: string) => Promise<string | undefined>;
+    resolveProject?: (pageUrl: string, root?: string) => Promise<string | undefined>;
     /** Overrides process lookups for the default resolver (tests). */
     exec?: Exec;
     /** Build a project's provider by id (tests). */
@@ -103,7 +103,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
     const dataDir = options.dataDir ?? defaultDataDir();
     const log = options.log ?? (() => {});
     const resolver = new ProjectResolver({ dataDir, exec: options.exec });
-    const resolveProject = options.resolveProject ?? (pageUrl => resolver.resolve(pageUrl));
+    const resolveProject =
+        options.resolveProject ?? ((pageUrl, root) => resolver.resolve(pageUrl, root));
     const sessions = new Map<string, Promise<Session>>();
     const overlayPath = resolveOverlayPath();
 
@@ -278,7 +279,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
             const message = raw as { type?: string; pageUrl?: string; root?: string };
             if (message.type === 'hello') {
                 pageUrl = message.pageUrl ?? '';
-                const root = await resolveProject(pageUrl).catch(() => undefined);
+                // `root` on hello is the repository the Vite or Next loader claims.
+                const claimed = typeof message.root === 'string' ? message.root : undefined;
+                const root = await resolveProject(pageUrl, claimed).catch(() => undefined);
                 if (root) return attach(root, raw);
                 return client.send({
                     type: 'project.unknown',

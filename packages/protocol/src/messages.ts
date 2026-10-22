@@ -45,6 +45,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
         type: z.literal('hello'),
         protocol: z.literal(PROTOCOL_VERSION),
         pageUrl: z.string(),
+        /** Repository root the page's dev server runs in (Vite and Next integrations). */
+        root: z.string().max(4096).optional(),
         build: BuildInfo.optional(),
         /** Tencil Cloud access token; the local daemon has no sign-in. */
         token: z.string().min(1).max(4096).optional(),

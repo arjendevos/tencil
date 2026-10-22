@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
     type Exec,
     isDockerForwarder,
+    isGitRoot,
     ProjectResolver,
     parseLsofCwd,
     parseNetstat,
@@ -235,5 +236,55 @@ describe('ProjectResolver', () => {
         await resolver.remember('http://localhost:8080/some/page', app);
         const later = new ProjectResolver({ dataDir, exec: none, platform: 'darwin' });
         expect(await later.resolve('http://localhost:8080/other')).toBe(app);
+    });
+
+    // A Laravel app on Sail: Docker listens on the page's port, not a process in the project.
+    const docker = fakeExec('/Users/me/Library/Containers/com.docker.docker/Data');
+
+    it('prefers the repository root from the loader over the port', async () => {
+        const { root, app } = monorepo();
+        mkdirSync(join(root, '.git'));
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: fakeExec(app),
+            platform: 'darwin',
+        });
+        expect(await resolver.resolve('http://localhost:8130/', root)).toBe(root);
+    });
+
+    it('refuses a claimed root without .git and falls back to the port', async () => {
+        const { root, app } = monorepo();
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: fakeExec(app),
+            platform: 'darwin',
+        });
+        expect(await resolver.resolve('http://localhost:5173/', root)).toBe(app);
+        expect(await resolver.resolve('http://localhost:5173/', 'relative/path')).toBe(app);
+        expect(await resolver.resolve('http://localhost:5173/', join(root, 'missing'))).toBe(app);
+    });
+
+    it('resolves a worktree, whose .git is a file, to the worktree itself', async () => {
+        const main = monorepo().root;
+        mkdirSync(join(main, '.git'));
+        const worktree = monorepo().root;
+        writeFileSync(join(worktree, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'x')}\n`);
+        const resolver = new ProjectResolver({
+            dataDir: tmp('tencil-data-'),
+            exec: docker,
+            platform: 'darwin',
+        });
+        expect(isGitRoot(worktree)).toBe(true);
+        expect(await resolver.resolve('http://localhost:8130/', worktree)).toBe(worktree);
+    });
+
+    it('still prefers what the user picked for the address', async () => {
+        const { root } = monorepo();
+        mkdirSync(join(root, '.git'));
+        const picked = monorepo().app;
+        const dataDir = tmp('tencil-data-');
+        const resolver = new ProjectResolver({ dataDir, exec: docker, platform: 'darwin' });
+        await resolver.remember('http://localhost:8130/', picked);
+        expect(await resolver.resolve('http://localhost:8130/', root)).toBe(picked);
     });
 });

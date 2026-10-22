@@ -64,6 +64,7 @@ export default function tencil(options: TencilViteOptions = {}): VitePlugin {
         },
         configResolved(config) {
             root = repositoryRoot(config.root);
+            if (command === 'serve') loader = overlayLoader(port, root);
         },
         transform(code, id) {
             // Production React has no source info: tag elements with file and line instead.

@@ -22,6 +22,13 @@ function bridgeUrlFromScript(): string {
     return DEFAULT_BRIDGE;
 }
 
+/** The repository root the Vite or Next loader put on our URL (`tencil.js?root=…`). */
+function rootFromScript(): string | undefined {
+    const script = document.currentScript as HTMLScriptElement | null;
+    if (!script?.src) return undefined;
+    return new URL(script.src).searchParams.get('root') ?? undefined;
+}
+
 /** The build a Tencil Cloud loader put on our script tag (see `cloudLoader`). */
 function buildFromScript(): BuildInfo | undefined {
     const data = (document.currentScript as HTMLScriptElement | null)?.dataset;
@@ -54,7 +61,7 @@ function registerProperties(): void {
     }
 }
 
-function mount(bridgeUrl: string, build: BuildInfo | undefined): void {
+function mount(bridgeUrl: string, build: BuildInfo | undefined, root: string | undefined): void {
     registerProperties();
     const host = document.createElement('tencil-overlay');
     host.setAttribute('data-tencil', '');
@@ -82,7 +89,7 @@ function mount(bridgeUrl: string, build: BuildInfo | undefined): void {
     const uninstall = installPicker(host);
     const unwatchNext = watchNextIndicator();
     render(h(App, {}), container);
-    connect(bridgeUrl, build);
+    connect(bridgeUrl, build, root);
 
     window.__TENCIL__ = {
         version: 1,
@@ -102,9 +109,10 @@ if (typeof window !== 'undefined' && !window.__TENCIL__) {
     // `currentScript` is only set while this runs, so read the tag before waiting for <body>.
     const bridgeUrl = bridgeUrlFromScript();
     const build = buildFromScript();
-    if (document.body) mount(bridgeUrl, build);
+    const root = rootFromScript();
+    if (document.body) mount(bridgeUrl, build, root);
     else {
-        document.addEventListener('DOMContentLoaded', () => mount(bridgeUrl, build), {
+        document.addEventListener('DOMContentLoaded', () => mount(bridgeUrl, build, root), {
             once: true,
         });
     }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withTencil } from './next.ts';
+import { repositoryRoot } from './source-attributes.ts';
 
 const PREVIEW = {
     TENCIL_CLOUD: 'proj_3fK9xQ2mVb7Lw1Za',
@@ -23,14 +24,21 @@ interface Wrapped {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('withTencil', () => {
+    it('hands <Tencil /> the repository root in development', () => {
+        vi.stubEnv('NODE_ENV', 'development');
+        const config = withTencil({ reactStrictMode: true, env: { API: 'x' } });
+        expect(config).toEqual({
+            reactStrictMode: true,
+            env: { API: 'x', TENCIL_ROOT: repositoryRoot(process.cwd()) },
+        });
+    });
+
     it('returns the config untouched outside Tencil Cloud previews', () => {
         const config = { reactStrictMode: true };
         vi.stubEnv('TENCIL_CLOUD', '');
         expect(withTencil(config)).toBe(config);
 
         for (const [name, value] of Object.entries(PREVIEW)) vi.stubEnv(name, value);
-        vi.stubEnv('NODE_ENV', 'development');
-        expect(withTencil(config)).toBe(config);
         vi.stubEnv('NODE_ENV', 'production');
         vi.stubEnv('VERCEL_ENV', 'production');
         expect(withTencil(config)).toBe(config);
