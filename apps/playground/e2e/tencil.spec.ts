@@ -35,9 +35,11 @@ test('connects to the agent through the bridge', async ({ page }) => {
     await status.hover();
     const card = overlay(page).getByRole('tooltip');
     await expect(card).toContainText('Tencil');
-    await expect(card.locator('.status-card-row').filter({ hasText: 'Daemon' })).toContainText(
-        'Connected',
-    );
+    // By its label: the workspace's folder name may contain "daemon" too.
+    const daemonRow = card
+        .locator('.status-card-row')
+        .filter({ has: page.locator('dt', { hasText: /^Daemon$/ }) });
+    await expect(daemonRow).toContainText('Connected');
     await expect(
         card.locator('.status-card-row').filter({ hasText: 'Agent' }).first(),
     ).toContainText('T3 Code');
