@@ -25,18 +25,21 @@ export async function startInBackground(
         return { status: 'running', pid: running.pid };
     }
     if (running) await stopDaemon(command.port);
+    spawnDaemon({ ...command, args: flags }, dataDir);
+    const health = await waitForDaemon(command.port, dataDir);
+    return { status: running ? 'restarted' : 'started', pid: health.pid };
+}
 
+/** Launch the daemon detached, logging to daemon.log. Doesn't wait for it. */
+export function spawnDaemon(command: DaemonCommand, dataDir: string): void {
     mkdirSync(dataDir, { recursive: true });
     const logFile = openSync(join(dataDir, 'daemon.log'), 'a');
-    const child = spawn(command.node, daemonArgs({ ...command, args: flags }), {
+    const child = spawn(command.node, daemonArgs(command), {
         detached: true,
         stdio: ['ignore', logFile, logFile],
         windowsHide: true,
     });
     child.unref();
-
-    const health = await waitForDaemon(command.port, dataDir);
-    return { status: running ? 'restarted' : 'started', pid: health.pid };
 }
 
 /** Wait for a daemon on `port` (optionally one of `version`) to answer. */
@@ -44,8 +47,9 @@ export async function waitForDaemon(
     port: number,
     dataDir: string,
     version?: string,
+    attempts = 100,
 ): Promise<{ pid: number }> {
-    for (let attempt = 0; attempt < 100; attempt++) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 100));
         const health = await probeDaemon(port);
         if (health && (!version || health.version === version)) return health;

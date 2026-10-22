@@ -11,6 +11,7 @@ npm install --save-dev @tencildev/testing
 - **`FakeT3Server`**: a stand-in T3 Code server (auth endpoints and the RPC
   WebSocket) that simulates streamed agent turns.
 - **`FakeAgentSdk`**: a stand-in for `@anthropic-ai/claude-agent-sdk`.
+- **`FakeRegistry`**: a stand-in npm registry that answers Tencil's `latest` version.
 - **`waitFor`**: poll until a condition holds.
 
 ```ts

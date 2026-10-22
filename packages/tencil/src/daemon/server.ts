@@ -26,6 +26,7 @@ import { type Exec, ProjectResolver } from './project-resolver.ts';
 import { FileProjectSettings, projectSettingsPath } from './project-settings.ts';
 import { isAllowedHost, isAllowedOrigin, knownHostsFor } from './security.ts';
 import { defaultDataDir, FileThreadStore } from './thread-store.ts';
+import { type UpdateOptions, Updater } from './updates.ts';
 
 export const DEFAULT_PORT = 4747;
 /** Screenshots ride along as data URLs. */
@@ -64,6 +65,10 @@ export interface DaemonOptions {
     log?: (message: string) => void;
     /** The CLI flags this daemon runs with, reported on /health so a restart can keep them. */
     flags?: string[];
+    /** The CLI entry this daemon runs from; updating from the overlay needs it. */
+    cli?: string;
+    /** Update checks and the overlay's Update button (fakes in tests). */
+    updates?: UpdateOptions;
 }
 
 export interface ProjectStatus {
@@ -78,6 +83,8 @@ export interface Daemon {
     scriptUrl: string;
     port: number;
     projects(): ProjectStatus[];
+    /** Look for a new Tencil now instead of at the next daily check. */
+    checkForUpdates(): Promise<void>;
     close(): Promise<void>;
 }
 
@@ -85,6 +92,7 @@ interface Session {
     root: string;
     bridge: Bridge;
     providers: ProjectProviders;
+    store: FileThreadStore;
     clients: number;
 }
 
@@ -107,6 +115,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
         options.resolveProject ?? ((pageUrl, root) => resolver.resolve(pageUrl, root));
     const sessions = new Map<string, Promise<Session>>();
     const overlayPath = resolveOverlayPath();
+    // Created once the port is known; bridges read it when a page says hello.
+    let updater: Updater | undefined;
 
     const claudeCodeDir = join(dataDir, 'claude-code');
     const t3Url = options.t3?.url ?? process.env.TENCIL_T3_URL;
@@ -152,10 +162,11 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
                     store,
                     project: { name: basename(key), root: key },
                     version: VERSION,
+                    update: () => updater?.status() ?? { state: 'idle' },
                     log: message => log(`[${basename(key)}] ${message}`),
                 });
                 log(`Serving ${key} with ${providers.default().label}`);
-                return { root: key, bridge, providers, clients: 0 };
+                return { root: key, bridge, providers, store, clients: 0 };
             })();
             sessions.set(key, pending);
         }
@@ -290,6 +301,11 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
                     emptyHint: noChoicesHint,
                 });
             }
+            if (message.type === 'update.start') {
+                if (!updater) throw new Error("Tencil can't update itself yet");
+                // Runs for a while; progress goes out as `update` messages.
+                return void updater.update();
+            }
             if (message.type === 'project.select' && message.root) {
                 await resolver.remember(pageUrl, message.root);
                 return attach(message.root, { type: 'hello', protocol: 1, pageUrl });
@@ -339,6 +355,27 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
         for (const server of servers) server.close();
         throw error;
     }
+    updater = new Updater({
+        ...options.updates,
+        version: VERSION,
+        dataDir,
+        port: actualPort,
+        node: process.execPath,
+        cli: options.cli,
+        flags: options.flags ?? [],
+        running: async () =>
+            (await settled())
+                .flatMap(s => s.store.list())
+                .filter(thread => thread.status === 'starting' || thread.status === 'working')
+                .length,
+        onChange: update => {
+            const message = JSON.stringify({ type: 'update', update } satisfies ServerMessage);
+            for (const ws of wss.clients) if (ws.readyState === WebSocket.OPEN) ws.send(message);
+        },
+        log,
+    });
+    updater.start();
+
     const publicHost = host === '127.0.0.1' || host === '0.0.0.0' ? 'localhost' : host;
     const url = `http://${publicHost}:${actualPort}`;
     log(`Tencil daemon listening on ${url}`);
@@ -349,7 +386,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
         scriptUrl: `${url}/tencil.js`,
         port: actualPort,
         projects: () => statuses,
+        checkForUpdates: () => updater?.check() ?? Promise.resolve(),
         async close() {
+            updater?.dispose();
             for (const ws of wss.clients) ws.terminate();
             for (const s of await settled()) {
                 await s.bridge.dispose();

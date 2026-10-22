@@ -90,7 +90,18 @@ up, and registers it with launchd on macOS, systemd on Linux or Task Scheduler o
 Windows. Answer no and run `npx tencil start` after a restart instead.
 
 `npx tencil stop` stops it until you next log in; `npx tencil service uninstall`
-removes it. To update, run `npx tencil@latest setup` again.
+removes it.
+
+### Updates
+
+The daemon looks for a new Tencil when it starts and about once a day. When one
+is out, the overlay's settings show it, with an **Update** button: the daemon
+installs the new version into its runtime copy, waits until no thread is running,
+and restarts on it. If the new version doesn't start, the old one keeps running.
+`npx tencil@latest setup` updates by hand.
+
+Set `TENCIL_NO_UPDATE_CHECK=1` to stop the daemon and the CLI asking the npm
+registry; they don't on CI either.
 
 ### Pairing
 

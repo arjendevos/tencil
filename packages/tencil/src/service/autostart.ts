@@ -24,18 +24,29 @@ export function runtimeDir(dataDir: string, port = DEFAULT_PORT): string {
 }
 
 export function runtimeCli(dataDir: string, port = DEFAULT_PORT): string {
-    return join(runtimeDir(dataDir, port), 'node_modules', 'tencil', 'dist', 'cli.mjs');
+    return cliIn(runtimeDir(dataDir, port));
+}
+
+/** The CLI of a Tencil installed with `npm install --prefix dir`. */
+export function cliIn(dir: string): string {
+    return join(dir, 'node_modules', 'tencil', 'dist', 'cli.mjs');
 }
 
 export function runtimeInstallArgs(dataDir: string, spec: string, port = DEFAULT_PORT): string[] {
+    return installArgs(runtimeDir(dataDir, port), spec);
+}
+
+export function installArgs(dir: string, spec: string): string[] {
+    const registry = process.env.TENCIL_REGISTRY_URL;
     return [
         'install',
         '--prefix',
-        runtimeDir(dataDir, port),
+        dir,
         spec,
         '--no-audit',
         '--no-fund',
         '--loglevel=error',
+        ...(registry ? ['--registry', registry] : []),
     ];
 }
 

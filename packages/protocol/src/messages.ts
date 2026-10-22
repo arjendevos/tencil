@@ -38,6 +38,21 @@ export interface Viewer {
     access: 'write' | 'read';
 }
 
+/**
+ * The daemon's own updates (local only; Tencil Cloud leaves it out). `latest`
+ * is set when a newer Tencil is published. `state` walks through an update
+ * started from the overlay: installing it, waiting for running threads,
+ * restarting on it, or failed (the old version keeps running).
+ */
+export interface UpdateStatus {
+    latest?: string;
+    state: 'idle' | 'installing' | 'waiting' | 'restarting' | 'failed';
+    /** `waiting`: how many threads are still running. */
+    running?: number;
+    /** `failed`: what went wrong. */
+    error?: string;
+}
+
 /* ----------------------------- overlay → bridge ----------------------------- */
 
 export const ClientMessage = z.discriminatedUnion('type', [
@@ -113,6 +128,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
     }),
     /** Run new threads of the default provider on this model; null goes back to its default. */
     z.object({ type: z.literal('model.select'), model: z.string().min(1).nullable() }),
+    /** Install the latest Tencil and restart the daemon on it (local daemon only). */
+    z.object({ type: z.literal('update.start') }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export type ClientMessageInput = z.input<typeof ClientMessage>;
@@ -161,7 +178,11 @@ export type ServerMessage =
           threads: Thread[];
           /** Tencil Cloud only: who is signed in. */
           viewer?: Viewer;
+          /** Local daemon only: the latest version and any update in progress. */
+          update?: UpdateStatus;
       }
+    /** The update status changed: a check found a newer version, or an update moved on. */
+    | { type: 'update'; update: UpdateStatus }
     /** Tencil Cloud: sign in first (no token, or one it no longer accepts). */
     | { type: 'auth.required'; signIn: CloudSignIn; reason?: string }
     | { type: 'provider.status'; provider: ProviderInfo }

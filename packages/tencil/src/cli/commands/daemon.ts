@@ -11,6 +11,7 @@ export async function runDaemon(
     provider: ProviderName | undefined,
     t3Url: string | undefined,
     runtimeMode: RuntimeMode | undefined,
+    cli: string,
 ): Promise<void> {
     // T3 Code models read `instance:model`; anything else is a Claude Code model.
     const model = values.model as string | undefined;
@@ -32,6 +33,7 @@ export async function runDaemon(
         },
         log: message => console.log(`${pc.dim(time())} ${message}`),
         flags: forwardedFlags(values),
+        cli,
     }).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'EADDRINUSE') {
             throw new Error(

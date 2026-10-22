@@ -13,6 +13,7 @@ import { isServiceInstalled, stopService } from '../service/login-service.ts';
 import { VERSION } from '../version.ts';
 import { connect } from './commands/connect.ts';
 import { runDaemon } from './commands/daemon.ts';
+import { finishUpdateCommand } from './commands/finish-update.ts';
 import { quickstart } from './commands/quickstart.ts';
 import { service } from './commands/service.ts';
 import { setup } from './commands/setup.ts';
@@ -118,7 +119,14 @@ async function main(): Promise<void> {
                 t3Url,
             });
         case 'daemon':
-            return runDaemon(values, port, provider, t3Url, runtimeMode as RuntimeMode | undefined);
+            return runDaemon(
+                values,
+                port,
+                provider,
+                t3Url,
+                runtimeMode as RuntimeMode | undefined,
+                daemonCommand.cli,
+            );
         case 'start':
             if (values.foreground) {
                 return runDaemon(
@@ -127,6 +135,7 @@ async function main(): Promise<void> {
                     provider,
                     t3Url,
                     runtimeMode as RuntimeMode | undefined,
+                    daemonCommand.cli,
                 );
             }
             return start(daemonCommand);
@@ -157,6 +166,9 @@ async function main(): Promise<void> {
             return service(rest[0], daemonCommand, values.from);
         case 'connect':
             return connect(rest[0], t3Url);
+        // Not in the help: the daemon runs it to restart itself on a new version.
+        case 'finish-update':
+            return finishUpdateCommand(rest[0]);
         case 'init':
             return runInit({
                 root: resolve(values.root ?? process.cwd()),

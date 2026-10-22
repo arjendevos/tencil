@@ -629,6 +629,23 @@ kbd {
 .settings-radio:checked { box-shadow: inset 0 0 0 4px var(--accent); }
 .settings-radio:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-status { margin: 2px 2px 0; color: var(--n-600); font-size: 12px; }
+.settings-about-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.settings-version { color: var(--n-600); font-size: 12px; font-variant-numeric: tabular-nums; }
+.settings-update { display: grid; gap: 8px; justify-items: start; }
+.settings-help a { color: var(--accent); text-decoration: none; }
+.settings-help a:hover { text-decoration: underline; }
+.settings-update-button:disabled { opacity: 0.6; cursor: default; }
+.settings-update-error { display: grid; gap: 6px; }
+.settings-update-error .settings-help { color: var(--error); }
+.settings-command {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--n-100);
+}
+.settings-command code { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-copy {
+  flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  background: var(--surface); box-shadow: 0 0 0 1px var(--n-200);
+}
 
 /* --------------------------------- toolbar -------------------------------- */
 .toolbar-wrap {
@@ -769,6 +786,10 @@ kbd {
 .tool-send { background: var(--accent); color: white; }
 .tool-send:disabled { opacity: 0.5; cursor: default; }
 .tool:disabled { opacity: 0.45; cursor: default; }
+.tool-dot {
+  position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 999px;
+  background: var(--accent);
+}
 .badge {
   position: absolute; top: 2px; right: 0;
   min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
