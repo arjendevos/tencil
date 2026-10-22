@@ -252,6 +252,25 @@ describe('Ensemble provider', () => {
         ]);
     });
 
+    it('follows a thread watched again after its last watch ended', async () => {
+        const { provider, server } = await setup();
+        const thread = server.addThread({ projectId: 'p1', title: 'Again' });
+        await provider.start();
+        const first = recordingSink();
+        const unwatch = provider.watch(thread.id, first.sink);
+        await waitFor(() => first.last() === 'idle', { message: 'first replay' });
+        unwatch();
+
+        const { sink, messages, last } = recordingSink();
+        provider.watch(thread.id, sink);
+        await waitFor(() => last() === 'idle', { message: 'second replay' });
+        await provider.sendMessage({ providerThreadId: thread.id, text: 'Again', attachments: [] });
+        await waitFor(() => [...messages.values()].some(m => m.text === 'Done: Again'), {
+            message: 'reply after watching again',
+        });
+        await waitFor(() => last() === 'idle', { message: 'idle after the turn' });
+    });
+
     it('stops a turn', async () => {
         const { provider, server } = await setup();
         const thread = server.addThread({ projectId: 'p1', title: 'Stop' });

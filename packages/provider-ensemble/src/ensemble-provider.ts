@@ -326,10 +326,9 @@ export class EnsembleProvider implements Provider {
             if (thread.archivedAt || thread.state === 'archived') return watcher.sink.gone();
             this.#deliver(watcher, watcher.state.snapshot());
             for (const event of pending) this.#deliver(watcher, watcher.state.apply(event));
-            if (this.#cursor === undefined) {
-                this.#cursor = watcher.state.seq;
-                this.#poll();
-            }
+            this.#cursor ??= watcher.state.seq;
+            // Polling stops when the last watch ends; a later watch starts it again.
+            this.#poll();
         } catch (error) {
             if (error instanceof EnsembleHttpError && error.status === 404) {
                 watcher.pending = undefined;
