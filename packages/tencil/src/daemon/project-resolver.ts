@@ -46,17 +46,36 @@ export class ProjectResolver {
         return origin ? this.#memory.set(origin, resolve(root)) : Promise.resolve();
     }
 
-    /** Folder of the process listening on `port`: its working directory, or its script's package. */
+    /**
+     * Folder of the process listening on `port`: its working directory, or its script's
+     * package. When Docker publishes the port, the compose project of the container.
+     */
     async folderForPort(port: number): Promise<string | undefined> {
-        for (const pid of await this.#listeners(port)) {
+        const pids = await this.#listeners(port);
+        // Linux hides root's sockets (docker-proxy) from other users, and Docker without
+        // its userland proxy has no listener at all.
+        if (pids.length === 0 && this.#platform === 'linux') return this.#composeFolder(port);
+        for (const pid of pids) {
             const cwd = await this.#cwd(pid).catch(() => undefined);
             if (cwd && cwd !== sep && existsSync(join(cwd, 'package.json'))) return cwd;
-            const fromCommand = projectFromCommandLine(
-                await this.#commandLine(pid).catch(() => ''),
-            );
+            const commandLine = await this.#commandLine(pid).catch(() => '');
+            if (isDockerForwarder(commandLine)) return this.#composeFolder(port);
+            const fromCommand = projectFromCommandLine(commandLine);
             if (fromCommand) return fromCommand;
         }
         return undefined;
+    }
+
+    /** Working directory of the compose project whose container publishes `port`. */
+    async #composeFolder(port: number): Promise<string | undefined> {
+        const output = await this.#exec('docker', [
+            'ps',
+            '--filter',
+            `publish=${port}`,
+            '--format',
+            '{{.Label "com.docker.compose.project.working_dir"}}',
+        ]).catch(() => '');
+        return firstLine(output);
     }
 
     async #listeners(port: number): Promise<number[]> {
@@ -137,6 +156,18 @@ export function parseNetstat(output: string, port: number): number[] {
 }
 
 /**
+ * Processes that forward a published container port to the host: Docker Desktop
+ * (`com.docker.backend`, `vpnkit` before 4.x), Docker Engine on Linux (`docker-proxy`),
+ * OrbStack (`OrbStack Helper`), Colima and Rancher Desktop (`limactl`), Podman (`gvproxy`)
+ * and WSL 2's localhost relay (`wslrelay`).
+ */
+export function isDockerForwarder(commandLine: string): boolean {
+    return /(?:^|[\\/"])(?:com\.docker\.backend|vpnkit|docker-proxy|OrbStack Helper|limactl|gvproxy|wslrelay)(?:\.exe)?(?:["\s]|$)/i.test(
+        commandLine.trim(),
+    );
+}
+
+/**
  * Dev servers are started from a project's node_modules
  * (`…/eyes/apps/frontend/node_modules/next/dist/bin/next dev`): the part
  * before `node_modules` is the project.
@@ -146,6 +177,13 @@ export function projectFromCommandLine(commandLine: string): string | undefined 
         /(?:^|[\s"'])((?:[A-Za-z]:)?[\\/][^\s"']*?)[\\/]node_modules[\\/]/,
     );
     return match?.[1];
+}
+
+function firstLine(output: string): string | undefined {
+    return output
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .find(Boolean);
 }
 
 function safeOrigin(pageUrl: string): string | undefined {
