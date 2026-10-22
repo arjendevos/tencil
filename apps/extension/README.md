@@ -24,7 +24,7 @@ Then `chrome://extensions` → Developer mode → Load unpacked → `apps/extens
   remembered and Tencil loads again on every reload. Other sites get it for the
   current page only.
 - The badge shows `ON`, or `!` when the daemon isn't running.
-- The icons in `public/` are `icon.svg` (the overlay's logo) rendered at 16, 32, 48
+- The icons in `public/` are `icon.svg` (the Tencil mark, as on tencil.dev) rendered at 16, 32, 48
   and 128 px.
 
 Limits: a strict `connect-src` CSP still blocks the overlay's connection to the
