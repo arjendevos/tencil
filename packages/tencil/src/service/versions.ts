@@ -28,18 +28,38 @@ export class NewerDaemonError extends Error {
     }
 }
 
+const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
+
+/** Where to look Tencil up: npm, or `TENCIL_REGISTRY_URL` (a mirror, a test registry). */
+export function registryUrl(env: NodeJS.ProcessEnv = process.env): string {
+    return (env.TENCIL_REGISTRY_URL || DEFAULT_REGISTRY).replace(/\/+$/, '');
+}
+
+/**
+ * Machines that shouldn't phone home: `TENCIL_NO_UPDATE_CHECK` is set, or
+ * it's CI. Neither the CLI nor the daemon asks the registry then.
+ */
+export function updateChecksDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+    const set = (value: string | undefined) =>
+        value !== undefined && value !== '' && value !== '0' && value.toLowerCase() !== 'false';
+    return set(env.TENCIL_NO_UPDATE_CHECK) || set(env.CI);
+}
+
 /** The newest published Tencil, or undefined when the registry doesn't answer quickly. */
-export async function latestVersion(): Promise<string | undefined> {
-    const response = await fetch('https://registry.npmjs.org/tencil/latest', {
-        signal: AbortSignal.timeout(1_500),
+export async function latestVersion(
+    options: { registry?: string; timeoutMs?: number } = {},
+): Promise<string | undefined> {
+    const response = await fetch(`${options.registry ?? registryUrl()}/tencil/latest`, {
+        signal: AbortSignal.timeout(options.timeoutMs ?? 1_500),
     }).catch(() => undefined);
     if (!response?.ok) return undefined;
     const body = (await response.json().catch(() => undefined)) as { version?: string } | undefined;
-    return body?.version;
+    return typeof body?.version === 'string' ? body.version : undefined;
 }
 
 /** A one-line nudge when a newer Tencil is published. */
 export async function updateNotice(): Promise<string | undefined> {
+    if (updateChecksDisabled()) return undefined;
     const latest = await latestVersion();
     return latest && isNewerThanThis(latest)
         ? `Tencil ${latest} is out (this is ${VERSION}): npx tencil@latest`

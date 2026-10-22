@@ -4,7 +4,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { VERSION } from '../version.ts';
 import { enableAutostart, ensureDaemon } from './autostart.ts';
 import { startInBackground } from './background.ts';
-import { compareVersions, isNewerThanThis, NewerDaemonError } from './versions.ts';
+import {
+    compareVersions,
+    isNewerThanThis,
+    NewerDaemonError,
+    registryUrl,
+    updateChecksDisabled,
+} from './versions.ts';
 
 describe('compareVersions', () => {
     it('compares by number, not as text', () => {
@@ -15,6 +21,23 @@ describe('compareVersions', () => {
         expect(isNewerThanThis('999.0.0')).toBe(true);
         expect(isNewerThanThis(VERSION)).toBe(false);
         expect(isNewerThanThis(undefined)).toBe(false);
+    });
+});
+
+describe('update checks', () => {
+    it('are off with TENCIL_NO_UPDATE_CHECK or on CI', () => {
+        expect(updateChecksDisabled({})).toBe(false);
+        expect(updateChecksDisabled({ TENCIL_NO_UPDATE_CHECK: '1' })).toBe(true);
+        expect(updateChecksDisabled({ CI: 'true' })).toBe(true);
+        expect(updateChecksDisabled({ CI: '' })).toBe(false);
+        expect(updateChecksDisabled({ CI: 'false', TENCIL_NO_UPDATE_CHECK: '0' })).toBe(false);
+    });
+
+    it('ask npm unless another registry is given', () => {
+        expect(registryUrl({})).toBe('https://registry.npmjs.org');
+        expect(registryUrl({ TENCIL_REGISTRY_URL: 'http://127.0.0.1:4873/' })).toBe(
+            'http://127.0.0.1:4873',
+        );
     });
 });
 

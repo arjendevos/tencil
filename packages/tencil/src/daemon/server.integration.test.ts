@@ -1,12 +1,15 @@
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServerMessage, Thread } from '@tencildev/protocol';
 import { CredentialStore } from '@tencildev/provider-t3code';
-import { FakeT3Server, waitFor } from '@tencildev/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { FakeRegistry, FakeT3Server, waitFor } from '@tencildev/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
+import { cliIn } from '../service/autostart.ts';
+import type { Installer, UpdatePlan } from '../service/self-update.ts';
+import { VERSION } from '../version.ts';
 import { type Daemon, type DaemonOptions, startDaemon } from './server.ts';
 
 const FAST = { httpMs: 300, rpcMs: 2_000, retryMinMs: 20, retryMaxMs: 100 };
@@ -33,12 +36,17 @@ const tmp = (prefix: string) => realpathSync.native(mkdtempSync(join(tmpdir(), p
  * to project A, 3002 to project B; anything else is unknown.
  */
 async function setup(
-    options: { protocol?: 1 | 2; paired?: boolean } & Partial<DaemonOptions> = {},
+    options: {
+        protocol?: 1 | 2;
+        paired?: boolean;
+        chunkDelayMs?: number;
+    } & Partial<DaemonOptions> = {},
 ) {
     const projectA = tmp('tencil-a-');
     const projectB = tmp('tencil-b-');
     const t3 = await FakeT3Server.start({
         protocol: options.protocol ?? 1,
+        ...(options.chunkDelayMs && { chunkDelayMs: options.chunkDelayMs }),
         projects: [
             { id: 'proj-a', title: 'alpha', workspaceRoot: projectA },
             { id: 'proj-b', title: 'beta', workspaceRoot: projectB },
@@ -64,6 +72,8 @@ async function setup(
             createPairingCode: async () => t3.issuePairingCode(),
         },
         resolveProject: async pageUrl => byPort[new URL(pageUrl).port],
+        // No registry requests unless a test brings its own.
+        updates: { check: false },
         ...options,
     });
     cleanup.push(async () => {
@@ -270,5 +280,145 @@ describe('security', () => {
         const script = await httpGet(daemon.scriptUrl);
         expect(script.status).toBe(200);
         expect(script.body.length).toBeGreaterThan(1000);
+    });
+});
+
+describe('updates', () => {
+    /** Writes a package that says it's the version asked for, like a quick `npm install`. */
+    const fakeInstall: Installer = async (spec, dir) => {
+        mkdirSync(join(dir, 'node_modules', 'tencil', 'dist'), { recursive: true });
+        writeFileSync(
+            join(dir, 'node_modules', 'tencil', 'package.json'),
+            JSON.stringify({ version: spec.replace('tencil@', '') }),
+        );
+        writeFileSync(cliIn(dir), '');
+    };
+
+    const updates = (received: ServerMessage[]) =>
+        received.flatMap(m =>
+            m.type === 'update' ? [m.update] : m.type === 'ready' && m.update ? [m.update] : [],
+        );
+
+    async function withRegistry(latest = '999.0.0') {
+        const registry = await FakeRegistry.start({ latest });
+        cleanup.push(() => registry.close());
+        return registry;
+    }
+
+    it('tells pages about a newer version, in ready and when a later check finds one', async () => {
+        const registry = await withRegistry(VERSION);
+        const { daemon } = await setup({
+            updates: { check: true, registry: registry.url },
+        });
+        await waitFor(() => registry.requests.length === 1);
+        const page = await connectPage(daemon, 'http://localhost:3001/');
+        const ready = await waitFor(() => page.received.find(m => m.type === 'ready'));
+        expect(ready).toMatchObject({ version: VERSION, update: { state: 'idle' } });
+        expect(updates(page.received)[0]?.latest).toBeUndefined();
+
+        registry.latest = '999.0.0';
+        // The daemon checks on start and then daily; run the next check now.
+        await daemon.checkForUpdates();
+        await waitFor(() =>
+            page.received.some(m => m.type === 'update' && m.update.latest === '999.0.0'),
+        );
+    });
+
+    it('asks no registry with TENCIL_NO_UPDATE_CHECK set', async () => {
+        const registry = await withRegistry();
+        vi.stubEnv('TENCIL_NO_UPDATE_CHECK', '1');
+        cleanup.push(() => void vi.unstubAllEnvs());
+        const { daemon } = await setup({ updates: { registry: registry.url } });
+        const page = await connectPage(daemon, 'http://localhost:3001/');
+        await waitFor(() => page.received.some(m => m.type === 'ready'));
+        expect(registry.requests).toEqual([]);
+    });
+
+    it('installs the new version and hands over to the restart helper', async () => {
+        const registry = await withRegistry();
+        const plans: UpdatePlan[] = [];
+        const { daemon } = await setup({
+            cli: '/runtime/tencil/dist/cli.mjs',
+            flags: ['--listen', '100.64.0.1'],
+            updates: {
+                check: true,
+                registry: registry.url,
+                install: fakeInstall,
+                handOff: plan => plans.push(plan),
+            },
+        });
+        const page = await connectPage(daemon, 'http://localhost:3001/');
+        await waitFor(() => updates(page.received).some(update => update.latest === '999.0.0'));
+        page.send({ type: 'update.start' });
+        await waitFor(() => plans.length === 1);
+        expect(updates(page.received).map(update => update.state)).toEqual(
+            expect.arrayContaining(['installing', 'restarting']),
+        );
+        expect(plans[0]).toMatchObject({
+            version: '999.0.0',
+            port: daemon.port,
+            flags: ['--listen', '100.64.0.1'],
+            previousCli: '/runtime/tencil/dist/cli.mjs',
+        });
+    });
+
+    it('waits for running threads before restarting', async () => {
+        const registry = await withRegistry();
+        const plans: UpdatePlan[] = [];
+        const { daemon } = await setup({
+            chunkDelayMs: 150,
+            cli: '/runtime/tencil/dist/cli.mjs',
+            updates: {
+                check: true,
+                registry: registry.url,
+                install: fakeInstall,
+                handOff: plan => plans.push(plan),
+                idlePollMs: 20,
+            },
+        });
+        const page = await connectPage(daemon, 'http://localhost:3001/');
+        await ready(page.received);
+        await waitFor(() => updates(page.received).some(update => update.latest));
+        page.send(
+            pin('busy', 'Rewrite the whole pricing section please', 'http://localhost:3001/'),
+        );
+        await waitFor(() => page.latest('busy')?.status === 'working');
+
+        page.send({ type: 'update.start' });
+        await waitFor(() =>
+            updates(page.received).some(u => u.state === 'waiting' && u.running === 1),
+        );
+        expect(plans).toEqual([]);
+        await waitFor(() => page.latest('busy')?.status === 'idle', { timeoutMs: 10_000 });
+        await waitFor(() => plans.length === 1);
+    });
+
+    it('reports a failed install and keeps running', async () => {
+        const registry = await withRegistry();
+        const { daemon } = await setup({
+            cli: '/runtime/tencil/dist/cli.mjs',
+            updates: {
+                check: true,
+                registry: registry.url,
+                install: async () => {
+                    throw new Error('npm install failed (1): E404 tencil@999.0.0');
+                },
+                handOff: () => {
+                    throw new Error('should not restart');
+                },
+            },
+        });
+        const page = await connectPage(daemon, 'http://localhost:3001/');
+        await waitFor(() => updates(page.received).some(update => update.latest));
+        page.send({ type: 'update.start' });
+        const failed = await waitFor(() =>
+            updates(page.received).find(update => update.state === 'failed'),
+        );
+        expect(failed).toEqual({
+            latest: '999.0.0',
+            state: 'failed',
+            error: 'npm install failed (1): E404 tencil@999.0.0',
+        });
+        expect((await httpGet(`${daemon.url}/health`)).status).toBe(200);
     });
 });
