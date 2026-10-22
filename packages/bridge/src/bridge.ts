@@ -9,6 +9,7 @@ import {
     type Thread,
     type ThreadMessage,
     type ThreadStep,
+    type UpdateStatus,
     type Viewer,
 } from '@tencildev/protocol';
 import type { ProjectProviders } from './project-providers.ts';
@@ -26,6 +27,11 @@ export interface BridgeOptions {
     store: ThreadStore;
     project: { name: string; root: string };
     version: string;
+    /**
+     * The host's own updates, sent in `ready`. The local daemon has them (and
+     * handles `update.start` itself); Tencil Cloud doesn't.
+     */
+    update?: () => UpdateStatus;
     log?: (message: string) => void;
 }
 
@@ -94,6 +100,7 @@ export class Bridge {
                         settings: this.#settings(),
                         threads: this.#options.store.list(),
                         ...(client.viewer && { viewer: client.viewer }),
+                        ...(this.#options.update && { update: this.#options.update() }),
                     });
                     return;
                 case 'thread.create':
@@ -182,6 +189,8 @@ export class Bridge {
                     if (provider?.threadId) this.#release(provider.id, provider.threadId);
                     return;
                 }
+                case 'update.start':
+                    throw new Error("Tencil can't update itself here");
             }
         } catch (error) {
             const threadId = 'threadId' in message ? message.threadId : undefined;
