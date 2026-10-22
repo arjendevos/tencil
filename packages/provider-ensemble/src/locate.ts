@@ -1,8 +1,10 @@
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 
-const BUNDLE_ID = 'studio.terrabyte.ensemble';
+/** The app's bundle id; versions before the rename used the second. */
+const BUNDLE_IDS = ['co.tryensemble.ensemble', 'studio.terrabyte.ensemble'];
 
 /**
  * Where the Ensemble app keeps its local host: the port it listens on, its
@@ -17,7 +19,8 @@ export function defaultEnsembleDir(): string {
             : process.platform === 'win32'
               ? (process.env.APPDATA ?? join(home, 'AppData', 'Roaming'))
               : (process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'));
-    return join(appData, BUNDLE_ID, 'local-host');
+    const dirs = BUNDLE_IDS.map(id => join(appData, id, 'local-host'));
+    return dirs.find(dir => existsSync(dir)) ?? (dirs[0] as string);
 }
 
 /** The local host's URL, from the port it wrote on start. Undefined when Ensemble never ran. */
