@@ -1,6 +1,3 @@
-import { access, realpath } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { basename, dirname, join, relative, sep } from 'node:path';
 import type {
     CreatedThread,
     CreateThreadInput,
@@ -11,88 +8,56 @@ import type {
     ProviderThreadSummary,
     SendMessageInput,
     ThreadSink,
-    ThreadStatus,
 } from '@tencildev/protocol';
 import {
-    type EnsembleAttachment,
     EnsembleClient,
-    type EnsembleEvent,
     EnsembleHttpError,
-    type EnsembleProject,
-    type EnsembleThread,
+    type EnsembleImage,
+    EnsembleUnauthorizedError,
+    ensembleUrl,
+    errorMessage,
 } from './api.ts';
-import { defaultEnsembleDir, ensembleUrl, threadForPath } from './locate.ts';
-import { ThreadState, type Update } from './transcript.ts';
+import { EnsembleCredentialStore } from './auth.ts';
+import { ensembleRoot, ensembleThreadId } from './projects.ts';
+import { ThreadFeed, type ThreadFeedOptions } from './thread-feed.ts';
 
 export interface EnsembleProviderOptions {
-    /** Directory the dev site lives in. */
+    /** The Ensemble thread this project is: `ensemble://thread/<id>`. */
     projectRoot: string;
-    /** The Ensemble host; read from its `listen-port` file when absent. */
     baseUrl?: string;
-    /** Ensemble's local host folder; see `defaultEnsembleDir`. */
-    ensembleDir?: string;
-    timeouts?: {
+    credentials?: EnsembleCredentialStore;
+    timeouts?: ThreadFeedOptions['timeouts'] & {
         requestMs?: number;
-        /** How long one events poll waits for news. */
-        pollSeconds?: number;
-        reconnectMinMs?: number;
-        reconnectMaxMs?: number;
+        /** How long to wait before trying an Ensemble app that isn't running again. */
+        retryMs?: number;
     };
     log?: (message: string) => void;
 }
 
 /**
- * Where pins go: a page served from an Ensemble thread's workspace continues
- * that thread (its dev server runs the thread's code); any other page starts
- * threads in the Ensemble project holding it.
- */
-type Target =
-    | { kind: 'thread'; threadId: string; project: EnsembleProject }
-    | { kind: 'project'; project: EnsembleProject };
-
-interface Watcher {
-    threadId: string;
-    sink: ThreadSink;
-    state: ThreadState;
-    /** Live events that arrived while the transcript was loading. */
-    pending?: EnsembleEvent[];
-}
-
-/** Most transcript pages a replay reads; older history isn't shown. */
-const MAX_REPLAY_PAGES = 40;
-
-/**
- * Sends pins to Ensemble (tryensemble.co) through the HTTP API of the host it
- * runs on this machine. Ensemble keeps the conversations; the provider replays
- * a thread's transcript, then follows the host's event log.
+ * Sends pins to the Ensemble thread serving the page, one chat per pin, through
+ * Ensemble's public local API. Pins in a thread share one feed.
  */
 export class EnsembleProvider implements Provider {
     readonly id = 'ensemble';
     readonly label = 'Ensemble';
-
-    readonly #options: EnsembleProviderOptions;
-    readonly #dir: string;
+    readonly #baseUrl: string;
+    readonly #threadId?: string;
+    readonly #credentials: EnsembleCredentialStore;
+    readonly #feeds = new Map<string, ThreadFeed>();
+    readonly #listeners = new Set<(info: ProviderInfo) => void>();
     #info: ProviderInfo = { id: 'ensemble', label: 'Ensemble', state: 'connecting' };
-    #infoListeners = new Set<(info: ProviderInfo) => void>();
-    #client: EnsembleClient | undefined;
-    #target: Target | undefined;
-    #connecting: Promise<void> | undefined;
-    #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    #reconnectDelay: number;
-    readonly #watchers = new Map<string, Set<Watcher>>();
-    /** Last event seen in the host's log; polling starts once a replay sets it. */
-    #cursor: number | undefined;
-    #polling: AbortController | undefined;
+    /** Set while Ensemble accepts the token and the thread is open. */
+    #client?: EnsembleClient;
+    #starting?: Promise<void>;
+    #pairing?: Promise<void>;
+    #retry?: ReturnType<typeof setTimeout>;
     #disposed = false;
 
-    constructor(options: EnsembleProviderOptions) {
-        this.#options = options;
-        this.#dir = options.ensembleDir ?? defaultEnsembleDir();
-        this.#reconnectDelay = options.timeouts?.reconnectMinMs ?? 1000;
-    }
-
-    async start(): Promise<void> {
-        await this.#connect();
+    constructor(readonly options: EnsembleProviderOptions) {
+        this.#baseUrl = new URL(options.baseUrl ?? ensembleUrl()).origin;
+        this.#threadId = ensembleThreadId(options.projectRoot);
+        this.#credentials = options.credentials ?? new EnsembleCredentialStore();
     }
 
     info(): ProviderInfo {
@@ -100,364 +65,214 @@ export class EnsembleProvider implements Provider {
     }
 
     onInfoChange(listener: (info: ProviderInfo) => void): () => void {
-        this.#infoListeners.add(listener);
-        return () => this.#infoListeners.delete(listener);
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    start(): Promise<void> {
+        this.#starting ??= this.#connect().finally(() => {
+            this.#starting = undefined;
+        });
+        return this.#starting;
+    }
+
+    /** Ask the user to allow Tencil in Ensemble, then connect with the new token. */
+    pair(): Promise<void> {
+        this.#pairing ??= this.#pair().finally(() => {
+            this.#pairing = undefined;
+        });
+        return this.#pairing;
     }
 
     async listThreads(): Promise<{ project: ProviderProject; threads: ProviderThreadSummary[] }> {
-        const { client, target } = await this.#require();
-        const threads = (await client.threads())
-            .filter(
-                thread =>
-                    thread.projectId === target.project.id &&
-                    !thread.archivedAt &&
-                    thread.state !== 'archived',
-            )
-            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-            .map(
-                (thread): ProviderThreadSummary => ({
-                    id: thread.id,
-                    title: thread.title,
-                    status: threadStatus(thread),
-                    updatedAt: thread.createdAt,
-                    ...(thread.branch ? { branch: thread.branch } : {}),
-                    agent: thread.agent === 'codex' ? 'codex' : 'claudeAgent',
-                }),
-            );
-        return { project: { name: target.project.name }, threads };
+        const threadId = this.#requireThreadId();
+        const thread = await this.#call(client => client.thread(threadId));
+        // Ensemble gives no times, so every chat counts as current.
+        const updatedAt = new Date().toISOString();
+        return {
+            project: { name: thread.title },
+            threads: thread.chats.map(chat => {
+                const id = chatThreadId(threadId, chat.id);
+                return {
+                    id,
+                    title: chat.title,
+                    status: chat.status,
+                    updatedAt,
+                    url: this.threadUrl(id),
+                };
+            }),
+        };
     }
 
-    /** Ensemble has no links into its app. */
-    threadUrl(): string | undefined {
-        return undefined;
+    threadUrl(providerThreadId: string): string {
+        return ensembleRoot(parseChatThreadId(providerThreadId).threadId);
     }
 
     async createThread(input: CreateThreadInput): Promise<CreatedThread> {
-        const { client, target } = await this.#require();
-        if (target.kind === 'thread') {
-            await this.sendMessage({
-                providerThreadId: target.threadId,
-                text: input.text,
-                attachments: input.attachments,
-            });
-            return { providerThreadId: target.threadId };
-        }
-        const thread = await client.createThread({
-            projectId: target.project.id,
-            prompt: input.text,
-            title: input.title,
-            attachments: input.attachments.map(attachment),
-        });
-        this.#log(`Started Ensemble thread ${thread.id}`);
-        return { providerThreadId: thread.id };
+        const threadId = this.#requireThreadId();
+        const chat = await this.#call(client =>
+            client.createChat(threadId, {
+                title: input.title,
+                prompt: input.text,
+                attachments: input.attachments.map(toEnsembleImage),
+                ...(input.model ? { model: input.model } : {}),
+            }),
+        );
+        const providerThreadId = chatThreadId(threadId, chat.id);
+        return { providerThreadId, url: this.threadUrl(providerThreadId) };
     }
 
     async sendMessage(input: SendMessageInput): Promise<void> {
-        const { client } = await this.#require();
-        const question = this.#question(input.providerThreadId);
-        await client.sendMessage(input.providerThreadId, {
-            text: input.text,
-            attachments: input.attachments.map(attachment),
-            ...(question ? { answers: question } : {}),
-        });
+        const { threadId, chatId } = parseChatThreadId(input.providerThreadId);
+        await this.#call(client =>
+            client.sendMessage(threadId, chatId, {
+                text: input.text,
+                attachments: input.attachments.map(toEnsembleImage),
+            }),
+        );
     }
 
     async interrupt(providerThreadId: string): Promise<void> {
-        const { client } = await this.#require();
-        await client.stop(providerThreadId);
+        const { threadId, chatId } = parseChatThreadId(providerThreadId);
+        await this.#call(client => client.stop(threadId, chatId));
     }
 
     watch(providerThreadId: string, sink: ThreadSink): () => void {
-        const watcher: Watcher = {
-            threadId: providerThreadId,
-            sink,
-            state: new ThreadState(),
-            pending: [],
-        };
-        let set = this.#watchers.get(providerThreadId);
-        if (!set) {
-            set = new Set();
-            this.#watchers.set(providerThreadId, set);
+        const { threadId, chatId } = parseChatThreadId(providerThreadId);
+        let feed = this.#feeds.get(threadId);
+        if (!feed) {
+            feed = new ThreadFeed(threadId, {
+                onUnauthorized: () => this.#unauthorized(),
+                log: this.options.log,
+                timeouts: this.options.timeouts,
+            });
+            this.#feeds.set(threadId, feed);
         }
-        set.add(watcher);
-        void this.#replay(watcher);
+        const unwatch = feed.watch(chatId, sink);
+        if (this.#client) feed.follow(this.#client);
         return () => {
-            set.delete(watcher);
-            if (set.size === 0) this.#watchers.delete(providerThreadId);
-            if (this.#watchers.size === 0) this.#stopPolling();
+            unwatch();
+            if (!feed.watched) this.#feeds.delete(threadId);
         };
     }
 
     async dispose(): Promise<void> {
         this.#disposed = true;
-        clearTimeout(this.#reconnectTimer);
-        this.#stopPolling();
-        this.#watchers.clear();
+        clearTimeout(this.#retry);
+        for (const feed of this.#feeds.values()) feed.stop();
+        this.#feeds.clear();
     }
 
-    /* -------------------------------- connection ------------------------------- */
-
-    #connect(): Promise<void> {
-        this.#connecting ??= (async () => {
-            try {
-                const baseUrl = this.#options.baseUrl ?? (await ensembleUrl(this.#dir));
-                if (!baseUrl) {
-                    throw new Unavailable(
-                        "Ensemble isn't set up on this machine. Install it from tryensemble.co and open it once.",
-                    );
-                }
-                const client = new EnsembleClient({
-                    baseUrl,
-                    requestTimeoutMs: this.#options.timeouts?.requestMs,
-                });
-                await client.health().catch(() => {
-                    throw new Unavailable("Ensemble isn't running. Open the Ensemble app.");
-                });
-                this.#client = client;
-                const target = await this.#resolveTarget(client);
-                this.#target = target;
-                this.#reconnectDelay = this.#options.timeouts?.reconnectMinMs ?? 1000;
-                this.#setInfo({ state: 'ready', target: await this.#targetLabel(client, target) });
-                this.#log(`Ensemble ready at ${baseUrl}`);
-                // Watches made while disconnected load now.
-                for (const set of this.#watchers.values()) {
-                    for (const watcher of set) if (watcher.pending) void this.#replay(watcher);
-                }
-                this.#poll();
-            } catch (error) {
-                this.#setInfo({ state: 'unavailable', detail: errorMessage(error) });
-                this.#scheduleReconnect();
-            } finally {
-                this.#connecting = undefined;
-            }
-        })();
-        return this.#connecting;
-    }
-
-    #scheduleReconnect(): void {
-        if (this.#disposed || this.#reconnectTimer) return;
-        const delay = this.#reconnectDelay;
-        this.#reconnectDelay = Math.min(
-            delay * 2,
-            this.#options.timeouts?.reconnectMaxMs ?? 30_000,
-        );
-        this.#reconnectTimer = setTimeout(() => {
-            this.#reconnectTimer = undefined;
-            void this.#connect();
-        }, delay);
-        this.#reconnectTimer.unref?.();
-    }
-
-    /** The host went away (Ensemble quit, or restarted on another port). */
-    #lost(error: unknown): void {
-        if (this.#disposed) return;
-        this.#stopPolling();
-        this.#client = undefined;
-        this.#setInfo({ state: 'unavailable', detail: `Lost Ensemble: ${errorMessage(error)}` });
-        this.#scheduleReconnect();
-    }
-
-    async #require(): Promise<{ client: EnsembleClient; target: Target }> {
-        if (!this.#client || !this.#target) await this.#connect();
-        if (!this.#client || !this.#target) {
-            throw new Error(this.#info.detail ?? "Ensemble isn't available");
+    async #connect(): Promise<void> {
+        clearTimeout(this.#retry);
+        if (!(await new EnsembleClient({ baseUrl: this.#baseUrl }).isRunning())) {
+            return this.#retryLater("Ensemble isn't running. Open the Ensemble app.");
         }
-        return { client: this.#client, target: this.#target };
-    }
-
-    async #resolveTarget(client: EnsembleClient): Promise<Target> {
-        const root = await realpath(this.#options.projectRoot).catch(
-            () => this.#options.projectRoot,
-        );
-        const projects = await client.projects();
-        const threadId =
-            threadForPath(root, this.#dir) ?? threadForPath(root, await this.#realDir());
-        if (threadId) {
-            const thread = await client.thread(threadId).catch(() => undefined);
-            const project = thread && projects.find(p => p.id === thread.projectId);
-            if (thread && project) return { kind: 'thread', threadId, project };
+        const token = await this.#credentials.get(this.#baseUrl);
+        if (!token) return this.#unauthorized();
+        if (!this.#threadId) {
+            return this.#setInfo({
+                state: 'unavailable',
+                detail: 'Choose an open Ensemble thread, or reload a page an Ensemble thread serves.',
+            });
         }
-        let best: { project: EnsembleProject; depth: number } | undefined;
-        for (const project of projects) {
-            const folder = await realpath(project.remote).catch(() => project.remote);
-            if (!contains(folder, root)) continue;
-            const depth = folder.split(sep).length;
-            if (!best || depth > best.depth) best = { project, depth };
-        }
-        if (best) return { kind: 'project', project: best.project };
-        // Ensemble projects are repositories; name the one to add, not the app folder inside it.
-        const repo = (await repositoryRoot(root)) ?? root;
-        throw new Unavailable(
-            `${basename(repo)} isn't in Ensemble yet. Add ${tildify(repo)} as a project in Ensemble; Tencil picks it up on its own.`,
-        );
-    }
-
-    async #targetLabel(client: EnsembleClient, target: Target): Promise<string> {
-        if (target.kind === 'project') return target.project.name;
-        const thread = await client.thread(target.threadId).catch(() => undefined);
-        return thread ? `${target.project.name} · ${thread.title}` : target.project.name;
-    }
-
-    #realDir(): Promise<string> {
-        return realpath(this.#dir).catch(() => this.#dir);
-    }
-
-    /* --------------------------------- watching -------------------------------- */
-
-    /** Load the thread's history into the watcher, then hand it the live events that came meanwhile. */
-    async #replay(watcher: Watcher): Promise<void> {
-        const client = this.#client;
-        if (!client || !this.#isWatching(watcher)) return;
+        const client = new EnsembleClient({
+            baseUrl: this.#baseUrl,
+            token,
+            timeoutMs: this.options.timeouts?.requestMs,
+        });
         try {
-            const events: EnsembleEvent[] = [];
-            let before: number | undefined;
-            for (let page = 0; page < MAX_REPLAY_PAGES; page++) {
-                const result = await client.transcript(watcher.threadId, before);
-                events.push(...result.events);
-                const oldest = result.events[0]?.seq;
-                if (!result.more || oldest === undefined) break;
-                before = oldest;
-            }
-            const thread = await client.thread(watcher.threadId);
-            if (!this.#isWatching(watcher)) return;
-            for (const event of events.sort((a, b) => a.seq - b.seq)) watcher.state.apply(event);
-            const pending = watcher.pending ?? [];
-            watcher.pending = undefined;
-            if (thread.archivedAt || thread.state === 'archived') return watcher.sink.gone();
-            this.#deliver(watcher, watcher.state.snapshot());
-            for (const event of pending) this.#deliver(watcher, watcher.state.apply(event));
-            this.#cursor ??= watcher.state.seq;
-            // Polling stops when the last watch ends; a later watch starts it again.
-            this.#poll();
+            const thread = await client.thread(this.#threadId);
+            if (this.#disposed) return;
+            this.#client = client;
+            this.#setInfo({ state: 'ready', target: thread.title });
+            for (const feed of this.#feeds.values()) feed.follow(client);
         } catch (error) {
+            if (error instanceof EnsembleUnauthorizedError) return this.#unauthorized();
             if (error instanceof EnsembleHttpError && error.status === 404) {
-                watcher.pending = undefined;
-                watcher.sink.gone();
-                return;
+                return this.#setInfo({
+                    state: 'unavailable',
+                    detail: 'This Ensemble thread is closed. Choose an open one.',
+                });
             }
-            this.#log(`Couldn't load Ensemble thread ${watcher.threadId}: ${errorMessage(error)}`);
-            // Try again once the connection is back.
-            watcher.pending ??= [];
+            this.#retryLater(`Ensemble didn't answer: ${errorMessage(error)}`);
         }
     }
 
-    #poll(): void {
-        if (this.#polling || !this.#client || this.#cursor === undefined) return;
-        if (this.#watchers.size === 0) return;
-        const controller = new AbortController();
-        this.#polling = controller;
+    async #pair(): Promise<void> {
+        this.#setInfo({ state: 'connecting', detail: 'Allow Tencil in the Ensemble app.' });
+        try {
+            const token = await new EnsembleClient({ baseUrl: this.#baseUrl }).connect();
+            await this.#credentials.set(this.#baseUrl, token);
+        } catch (error) {
+            this.#setInfo({ state: 'unauthorized', canPair: true, detail: errorMessage(error) });
+            throw error;
+        }
+        // A connect already under way read the old token; connect again once it's done.
+        await this.#starting;
+        await this.start();
+    }
+
+    /** Run a call once connected; a refused token asks the user to pair again. */
+    async #call<T>(call: (client: EnsembleClient) => Promise<T>): Promise<T> {
+        if (!this.#client) await this.start();
         const client = this.#client;
-        const wait = this.#options.timeouts?.pollSeconds ?? 25;
-        void (async () => {
-            while (!controller.signal.aborted && this.#cursor !== undefined) {
-                let events: EnsembleEvent[];
-                try {
-                    events = await client.events(this.#cursor, wait, controller.signal);
-                } catch (error) {
-                    if (controller.signal.aborted) return;
-                    if (this.#polling === controller) this.#polling = undefined;
-                    return this.#lost(error);
-                }
-                for (const event of events) {
-                    this.#cursor = Math.max(this.#cursor ?? 0, event.seq);
-                    if (event.threadId) this.#dispatch(event);
-                }
-            }
-        })();
-    }
-
-    #stopPolling(): void {
-        this.#polling?.abort();
-        this.#polling = undefined;
-    }
-
-    #dispatch(event: EnsembleEvent): void {
-        const set = event.threadId ? this.#watchers.get(event.threadId) : undefined;
-        if (!set) return;
-        for (const watcher of set) {
-            if (watcher.pending) watcher.pending.push(event);
-            else this.#deliver(watcher, watcher.state.apply(event));
+        if (!client) throw new Error(this.#info.detail ?? 'Not connected to Ensemble');
+        try {
+            return await call(client);
+        } catch (error) {
+            if (error instanceof EnsembleUnauthorizedError) this.#unauthorized();
+            throw error;
         }
     }
 
-    #deliver(watcher: Watcher, update: Update): void {
-        for (const message of update.messages) watcher.sink.message(message);
-        for (const step of update.steps) watcher.sink.step?.(step);
-        if (update.status) watcher.sink.status(update.status.status, update.status.detail);
-        if (update.gone) watcher.sink.gone();
+    #requireThreadId(): string {
+        if (!this.#threadId) throw new Error('Choose an Ensemble thread first');
+        return this.#threadId;
     }
 
-    #isWatching(watcher: Watcher): boolean {
-        return !this.#disposed && (this.#watchers.get(watcher.threadId)?.has(watcher) ?? false);
+    #unauthorized(): void {
+        this.#client = undefined;
+        for (const feed of this.#feeds.values()) feed.stop();
+        this.#setInfo({
+            state: 'unauthorized',
+            canPair: true,
+            detail: 'Not connected to Ensemble. Pair, then allow Tencil in the Ensemble app.',
+        });
     }
 
-    #question(threadId: string): string | undefined {
-        for (const watcher of this.#watchers.get(threadId) ?? []) {
-            if (watcher.state.question) return watcher.state.question;
-        }
-        return undefined;
+    #retryLater(detail: string): void {
+        this.#client = undefined;
+        this.#setInfo({ state: 'unavailable', detail });
+        if (this.#disposed) return;
+        this.#retry = setTimeout(() => void this.start(), this.options.timeouts?.retryMs ?? 5_000);
+        this.#retry.unref?.();
     }
-
-    /* --------------------------------- helpers --------------------------------- */
 
     #setInfo(next: Omit<ProviderInfo, 'id' | 'label'>): void {
-        const info: ProviderInfo = { id: this.id, label: this.label, ...next };
-        if (
-            info.state === this.#info.state &&
-            info.detail === this.#info.detail &&
-            info.target === this.#info.target
-        ) {
-            return;
-        }
-        this.#info = info;
-        for (const listener of this.#infoListeners) listener(info);
-    }
-
-    #log(message: string): void {
-        this.#options.log?.(message);
+        if (this.#disposed) return;
+        this.#info = { id: this.id, label: this.label, ...next };
+        for (const listener of this.#listeners) listener(this.#info);
     }
 }
 
-class Unavailable extends Error {}
-
-function threadStatus(thread: EnsembleThread): Exclude<ThreadStatus, 'draft' | 'starting'> {
-    if (thread.state === 'running' || thread.state === 'starting') return 'working';
-    if (thread.state === 'failed') return 'error';
-    return 'idle';
+/** A pin's id is its Ensemble thread and chat: `<threadId>/<chatId>`. */
+function chatThreadId(threadId: string, chatId: string): string {
+    return `${threadId}/${chatId}`;
 }
 
-function attachment(image: ImageAttachment): EnsembleAttachment {
+function parseChatThreadId(providerThreadId: string): { threadId: string; chatId: string } {
+    const [threadId, chatId, ...rest] = providerThreadId.split('/');
+    if (!threadId || !chatId || rest.length) {
+        throw new Error(`Not an Ensemble chat: ${providerThreadId}`);
+    }
+    return { threadId, chatId };
+}
+
+function toEnsembleImage(image: ImageAttachment): EnsembleImage {
     return {
         name: image.name,
         mediaType: image.mimeType,
         data: image.dataUrl.slice(image.dataUrl.indexOf(',') + 1),
     };
-}
-
-function contains(folder: string, path: string): boolean {
-    const rel = relative(folder, path);
-    return rel === '' || (!rel.startsWith('..') && !rel.startsWith(sep) && !/^[a-z]:/i.test(rel));
-}
-
-/** The nearest folder at or above `dir` with a `.git` entry, if any. */
-async function repositoryRoot(dir: string): Promise<string | undefined> {
-    for (let current = dir; ; current = dirname(current)) {
-        if (await exists(join(current, '.git'))) return current;
-        if (dirname(current) === current) return undefined;
-    }
-}
-
-const exists = (path: string) =>
-    access(path).then(
-        () => true,
-        () => false,
-    );
-
-function tildify(path: string): string {
-    const home = homedir();
-    return path === home || path.startsWith(`${home}${sep}`) ? `~${path.slice(home.length)}` : path;
-}
-
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }
