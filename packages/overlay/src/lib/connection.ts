@@ -9,6 +9,7 @@ import type {
     ProviderThreadSummary,
     ServerMessage,
     Thread,
+    UpdateStatus,
 } from '@tencildev/protocol';
 import { forgetToken, signInRequired, storedToken, viewer } from './cloud-auth.ts';
 import { newId } from './id.ts';
@@ -22,6 +23,10 @@ export const settings = signal<ProjectSettings | null>(null);
 export const project = signal<{ name: string; root: string } | null>(null);
 /** The daemon's Tencil version, from its `ready`. */
 export const daemonVersion = signal<string | null>(null);
+/** The daemon's updates: a newer version, an update in progress (null on Tencil Cloud). */
+export const update = signal<UpdateStatus | null>(null);
+/** The version the daemon ran before an update from this page restarted it. */
+export const updatedFrom = signal<string | null>(null);
 export const threads = signal<ReadonlyMap<string, Thread>>(new Map());
 /** The provider's own threads for this project (null until first fetched). */
 export const providerThreads = signal<ProviderThreadSummary[] | null>(null);
@@ -126,8 +131,10 @@ function open(): void {
     ws.addEventListener('close', () => {
         if (socket !== ws) return;
         bridgeState.value = 'closed';
-        setTimeout(open, retry);
-        retry = Math.min(retry * 2, 10_000);
+        // A daemon restarting on a new version is back in seconds: keep trying quickly.
+        const restarting = update.value?.state === 'restarting';
+        setTimeout(open, restarting ? 500 : retry);
+        if (!restarting) retry = Math.min(retry * 2, 10_000);
     });
 }
 
@@ -142,7 +149,9 @@ function handle(message: ServerMessage): void {
                 provider.value = message.provider;
                 settings.value = message.settings;
                 project.value = message.project;
+                if (update.value?.state === 'restarting') updatedFrom.value = daemonVersion.value;
                 daemonVersion.value = message.version;
+                update.value = message.update ?? null;
                 threads.value = new Map(message.threads.map(thread => [thread.id, thread]));
             });
             return;
@@ -164,6 +173,9 @@ function handle(message: ServerMessage): void {
             return;
         case 'provider.status':
             provider.value = message.provider;
+            return;
+        case 'update':
+            update.value = message.update;
             return;
         case 'settings':
             batch(() => {

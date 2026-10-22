@@ -6,6 +6,7 @@ import { defineConfig, devices } from '@playwright/test';
 const FAKE_T3_PORT = 47390;
 const DAEMON_PORT = 47391;
 const APP_PORT = 5190;
+const FAKE_REGISTRY_PORT = 47392;
 // Fresh credentials and pin store per run, so local state never leaks in.
 const configHome = mkdtempSync(join(tmpdir(), 'tencil-e2e-'));
 
@@ -28,6 +29,12 @@ export default defineConfig({
             reuseExistingServer: false,
         },
         {
+            command: 'node --experimental-strip-types --no-warnings e2e/fake-registry.ts',
+            url: `http://127.0.0.1:${FAKE_REGISTRY_PORT}/tencil/latest`,
+            env: { FAKE_REGISTRY_PORT: String(FAKE_REGISTRY_PORT) },
+            reuseExistingServer: false,
+        },
+        {
             // The real daemon from the built CLI; it finds the playground's folder
             // from the Vite dev server's port, like it would on a developer's machine.
             command: `node ../../packages/tencil/dist/cli.mjs daemon --port ${DAEMON_PORT}`,
@@ -36,6 +43,9 @@ export default defineConfig({
                 TENCIL_T3_URL: `http://127.0.0.1:${FAKE_T3_PORT}`,
                 TENCIL_T3_TOKEN: 'test-token',
                 XDG_CONFIG_HOME: configHome,
+                // Update checks go to the fake registry, on CI too.
+                TENCIL_REGISTRY_URL: `http://127.0.0.1:${FAKE_REGISTRY_PORT}`,
+                CI: '',
             },
             reuseExistingServer: false,
         },

@@ -30,6 +30,7 @@ import {
     toggleRuler,
     unresolvedCount,
 } from '../lib/state.ts';
+import { updateAvailable } from './about-section.tsx';
 import {
     ArrowUpIcon,
     CommentIcon,
@@ -161,6 +162,9 @@ export function Toolbar() {
                     type="button"
                     class={`tool${settingsOpen.value ? ' tool-active' : ''}`}
                     title="Project settings"
+                    aria-label={
+                        updateAvailable.value ? 'Project settings (update available)' : undefined
+                    }
                     disabled={!project.value}
                     onClick={() => {
                         settingsOpen.value = !settingsOpen.value;
@@ -168,6 +172,7 @@ export function Toolbar() {
                     }}
                 >
                     <SettingsIcon />
+                    {updateAvailable.value && <span class="tool-dot" />}
                 </button>
             </div>
         </div>

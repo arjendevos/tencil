@@ -465,3 +465,39 @@ test('measures with Alt outside comment mode and comments on the selection', asy
             context: { tagName: 'button', spacing: { to: expect.stringContaining('h2') } },
         });
 });
+
+test('shows the version in settings and offers the update, with a fallback when it fails', async ({
+    page,
+    context,
+}) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openPlayground(page);
+    // The fake registry says 99.0.0 is out: the settings button gets a dot.
+    const button = overlay(page).locator('.tool[title="Project settings"]');
+    await expect(button.locator('.tool-dot')).toBeVisible();
+    await button.click();
+
+    const about = overlay(page).getByRole('region', { name: 'About Tencil' });
+    await expect(about.locator('.settings-version')).toHaveText(/^v\d+\.\d+\.\d+/);
+    await expect(about).toContainText('Tencil 99.0.0 is available.');
+    await expect(about.getByRole('link', { name: "What's new" })).toHaveAttribute(
+        'href',
+        /CHANGELOG\.md$/,
+    );
+
+    // It has no package to install, so the update fails and the old daemon stays.
+    await about.getByRole('button', { name: 'Update' }).click();
+    const failure = about.getByRole('alert');
+    await expect(failure).toContainText("Couldn't update", { timeout: 60_000 });
+    await expect(failure).toContainText('is still running');
+    await expect(failure.locator('code')).toHaveText('npx tencil@latest setup');
+    await expect(overlay(page).locator('.status-dot.status-ok')).toBeVisible();
+    await expect(button.locator('.tool-dot')).toHaveCount(0);
+
+    await failure.getByRole('button', { name: 'Copy' }).click();
+    await expect(failure.getByRole('button', { name: 'Copied' })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+        'npx tencil@latest setup',
+    );
+    await expect(about.getByRole('button', { name: 'Try again' })).toBeEnabled();
+});

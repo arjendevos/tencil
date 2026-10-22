@@ -3,12 +3,14 @@ import { forgetToken, viewer } from '../lib/cloud-auth.ts';
 import { cloudUrl, project, provider, reconnect, send, settings } from '../lib/connection.ts';
 import { ALT_KEY } from '../lib/measure.ts';
 import { setBatchAvailable, setRulerAvailable, settingsOpen } from '../lib/state.ts';
+import { AboutSection } from './about-section.tsx';
 import { AgentIcon } from './agent-icons.tsx';
 import { CloseIcon, LayersIcon, RulerIcon } from './icons.tsx';
 
 /**
  * Per-project settings, opened from the toolbar and drawn next to it: which
- * agent new pins go to, whether comments are batched, and the ruler.
+ * agent new pins go to, whether comments are batched, and the ruler. Below
+ * them, the Tencil version and its updates.
  */
 export function SettingsPanel() {
     if (!settingsOpen.value) return null;
@@ -119,6 +121,7 @@ export function SettingsPanel() {
             ) : (
                 <p class="empty">Connecting…</p>
             )}
+            <AboutSection />
             {viewer.value && (
                 <div class="settings-section settings-account">
                     <span class="settings-help">
