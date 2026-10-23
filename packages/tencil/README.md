@@ -132,8 +132,11 @@ if you remove Tencil in Ensemble › Settings › Ensemble API, pair again.
 
 Tencil uses the page's dev server port to find its Ensemble thread, including ports
 forwarded from another machine. Each pin creates a separate chat on that thread's
-checkout, so changes reload in the page. If no thread matches, use the overlay's
-project picker to choose an open Ensemble thread.
+checkout, so changes reload in the page. A dev server you run yourself, from a folder
+of an Ensemble project (or a worktree of its repository), starts a new Ensemble
+thread per pin instead; that thread works on its own branch, so its changes don't
+reach your page until you merge them. If the folder isn't in Ensemble, the overlay
+names the repository to add.
 
 Nobody is at a terminal to approve tool calls, so `--runtime-mode` decides up front:
 `full-access` (the default) lets Claude Code run anything; with the stricter modes,

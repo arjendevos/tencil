@@ -235,6 +235,7 @@ export class FakeEnsembleServer {
         if (method === 'GET' && path === 'projects') return json(200, this.projects);
         if (method === 'GET' && path === 'threads') return json(200, this.#openThreads(url));
         if (method === 'GET' && path === 'feed') return this.#feed(request, url, response, json);
+        if (method === 'POST' && path === 'threads') return this.#createThread(body, json);
         const match = path.match(
             /^threads\/([^/]+)(?:\/chats(?:\/([^/]+)(?:\/(messages|stop))?)?)?$/,
         );
@@ -286,6 +287,29 @@ export class FakeEnsembleServer {
                 (port === null || this.ports.get(Number(port)) === thread.id) &&
                 (project === null || project === thread.projectId),
         );
+    }
+
+    #createThread(
+        body: Record<string, unknown>,
+        json: (status: number, value?: unknown) => void,
+    ): void {
+        if (!this.projects.some(project => project.id === body.projectId)) {
+            json(404, { error: 'No project with that projectId: GET /v1/projects lists them.' });
+        } else if (!body.prompt) {
+            json(422, { error: 'Send a prompt.' });
+        } else {
+            const title = String(body.title ?? 'Thread');
+            const chat: Chat = { id: 'main', title, status: 'idle', messages: [], steps: [] };
+            const thread = this.addThread({
+                projectId: String(body.projectId),
+                title,
+                branch: `ensemble/${randomUUID()}`,
+                chats: [chat],
+            });
+            this.emit('thread', { threadId: thread.id, thread });
+            this.#run(thread.id, chat, String(body.prompt));
+            json(200, thread);
+        }
     }
 
     #createChat(thread: FakeEnsembleThread, body: Record<string, unknown>) {

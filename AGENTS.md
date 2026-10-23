@@ -56,6 +56,9 @@ apps/
   to allow Tencil and saves a private token. Resolve pages by dev server port through
   the public API (including forwarded ports), using `ensemble://thread/<id>` as the
   project identity. Each pin is a chat on that checkout; pins share its SSE feed.
+  A page served from a folder maps by path (`provider-ensemble/src/folders.ts`): an
+  Ensemble project's folder or a worktree of it starts a thread per pin, and a
+  thread's workspace is found by its branch.
 - **Published: `tencil`, `@tencildev/protocol`, `@tencildev/bridge` and `@tencildev/testing`.** The
   three libraries resolve to `src` in the workspace (`exports`) and to `dist` when packed
   (`publishConfig.exports`); verify with `pnpm --filter <name> pack`. `tencil` still bundles

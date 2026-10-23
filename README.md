@@ -51,7 +51,8 @@ so every provider receives identical input: text and images.
 - **Ensemble** (`@tencildev/provider-ensemble`): uses the app's public local API.
   Keep Ensemble running and allow Tencil once when pairing. The page's dev server
   port identifies its Ensemble thread (including forwarded ports); each pin creates
-  a chat on that thread's checkout. A shared feed streams chat messages and tool steps.
+  a chat on that thread's checkout. A page served from an Ensemble project's own folder
+  starts a new thread per pin. A shared feed streams chat messages and tool steps.
 
 A new provider is a workspace package that implements `Provider`, with tests against
 a fake of the agent in `packages/testing`. The daemon picks the provider per project in

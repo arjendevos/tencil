@@ -1,5 +1,6 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderMessage, ThreadSink, ThreadStatus, ThreadStep } from '@tencildev/protocol';
 import { FakeEnsembleServer, waitFor } from '@tencildev/testing';
@@ -258,5 +259,109 @@ describe('Ensemble public API', () => {
         expect(await listEnsembleProjects(options)).toEqual([
             { workspaceRoot: ensembleRoot(thread.id), title: 'Landing' },
         ]);
+    });
+});
+
+describe('pages served from a folder', () => {
+    function git(cwd: string, ...args: string[]) {
+        execFileSync('git', args, { cwd, stdio: 'ignore' });
+    }
+    /** A repository at `<tmp>/web` with an app folder, and a paired provider for `folder`. */
+    async function setupFolder(folder: (repo: string, tmp: string) => Promise<string> | string) {
+        const tmp = await realpath(await mkdtemp(join(tmpdir(), 'tencil-ensemble-folder-')));
+        const repo = join(tmp, 'web');
+        await mkdir(join(repo, 'apps', 'site'), { recursive: true });
+        await writeFile(join(repo, 'apps', 'site', 'index.html'), '');
+        git(repo, 'init', '-q', '-b', 'main');
+        git(repo, 'add', '.');
+        git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init');
+        const credentials = new EnsembleCredentialStore(join(tmp, 'credentials.json'));
+        const server = await FakeEnsembleServer.start({ turnDelayMs: 20 });
+        const provider = new EnsembleProvider({
+            projectRoot: await folder(repo, tmp),
+            baseUrl: server.url,
+            credentials,
+            timeouts: { requestMs: 1000, retryMs: 50 },
+        });
+        cleanup.push(async () => {
+            await provider.dispose();
+            await server.close();
+            await rm(tmp, { recursive: true, force: true });
+        });
+        return { provider, server, repo, tmp };
+    }
+
+    it('starts a thread per pin in the project whose folder serves the page', async () => {
+        const { provider, server, repo } = await setupFolder(repo => join(repo, 'apps', 'site'));
+        server.projects.push(
+            { id: 'web', name: 'web', source: { kind: 'local', path: repo } },
+            {
+                id: 'site',
+                name: 'site',
+                source: { kind: 'local', path: join(repo, 'apps', 'site') },
+            },
+        );
+        await provider.pair();
+        expect(provider.info()).toMatchObject({
+            state: 'ready',
+            target: 'site · new thread per pin',
+        });
+        const created = await provider.createThread(pin);
+        expect(server.callsOf('POST', 'threads')).toEqual([
+            { projectId: 'site', title: pin.title, prompt: pin.text, attachments: [] },
+        ]);
+        const [threadId, chatId] = created.providerThreadId.split('/');
+        expect(chatId).toBe('main');
+        expect(created.url).toBe(ensembleRoot(String(threadId)));
+        const a = record();
+        provider.watch(created.providerThreadId, a.sink);
+        await waitFor(() => [...a.messages.values()].some(m => m.text === `Done: ${pin.text}`));
+        const listed = await provider.listThreads();
+        expect(listed.project.name).toBe('site');
+        expect(listed.threads.map(t => t.id)).toEqual([created.providerThreadId]);
+    });
+
+    it("sends pins to the thread whose workspace is on the folder's branch", async () => {
+        const { provider, server } = await setupFolder(repo => {
+            git(repo, 'checkout', '-q', '-b', 'ensemble/landing');
+            return repo;
+        });
+        const thread = server.addThread({
+            projectId: 'web',
+            title: 'Landing',
+            branch: 'ensemble/landing',
+        });
+        server.addThread({ projectId: 'web', title: 'Other', branch: 'ensemble/other' });
+        await provider.pair();
+        expect(provider.info()).toMatchObject({ state: 'ready', target: 'Landing' });
+        const created = await provider.createThread(pin);
+        expect(created.providerThreadId).toMatch(new RegExp(`^${thread.id}/`));
+        expect(server.callsOf('POST', 'threads')).toEqual([]);
+    });
+
+    it("counts a worktree of a project's repository as that project", async () => {
+        const { provider, server, repo } = await setupFolder((repo, tmp) => {
+            git(repo, 'worktree', 'add', '-q', join(tmp, 'web-feature'), '-b', 'feature');
+            return join(tmp, 'web-feature', 'apps', 'site');
+        });
+        server.projects.push({ id: 'web', name: 'web', source: { kind: 'local', path: repo } });
+        await provider.pair();
+        expect(provider.info()).toMatchObject({
+            state: 'ready',
+            target: 'web · new thread per pin',
+        });
+    });
+
+    it('names the repository to add, and picks the project up once it is added', async () => {
+        const { provider, server, repo } = await setupFolder(repo => join(repo, 'apps', 'site'));
+        await provider.pair();
+        expect(provider.info().state).toBe('unavailable');
+        const where = repo.startsWith(homedir()) ? `~${repo.slice(homedir().length)}` : repo;
+        expect(provider.info().detail).toBe(
+            `web isn't in Ensemble yet. Add ${where} as a project in Ensemble.`,
+        );
+        server.projects.push({ id: 'web', name: 'web', source: { kind: 'local', path: repo } });
+        await waitFor(() => provider.info().state === 'ready');
+        expect(provider.info().target).toBe('web · new thread per pin');
     });
 });

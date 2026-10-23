@@ -16,6 +16,12 @@ export interface EnsembleChat {
     status: EnsembleStatus;
 }
 
+export interface EnsembleProject {
+    id: string;
+    name: string;
+    source: { kind: 'local'; path: string } | { kind: 'git'; url: string };
+}
+
 export interface EnsembleThread {
     id: string;
     projectId: string;
@@ -50,6 +56,10 @@ export interface NewChat {
     prompt: string;
     attachments: EnsembleImage[];
     model?: string;
+}
+
+export interface NewThread extends NewChat {
+    projectId: string;
 }
 
 export interface NewMessage {
@@ -145,12 +155,24 @@ export class EnsembleClient {
         return token;
     }
 
-    /** Open threads; with `port`, only the one whose app listens on that port of this Mac. */
-    threads(filter: { port?: number } = {}): Promise<EnsembleThread[]> {
-        return this.#request(
-            'GET',
-            filter.port === undefined ? 'threads' : `threads?port=${filter.port}`,
-        );
+    projects(): Promise<EnsembleProject[]> {
+        return this.#request('GET', 'projects');
+    }
+
+    /**
+     * Open threads; with `port`, only the one whose app listens on that port of this Mac,
+     * with `project`, only that project's.
+     */
+    threads(filter: { port?: number; project?: string } = {}): Promise<EnsembleThread[]> {
+        const query = new URLSearchParams();
+        if (filter.port !== undefined) query.set('port', String(filter.port));
+        if (filter.project !== undefined) query.set('project', filter.project);
+        return this.#request('GET', query.size ? `threads?${query}` : 'threads');
+    }
+
+    /** A new thread in `projectId`, on its own branch; its first chat runs `prompt`. */
+    createThread(thread: NewThread): Promise<EnsembleThread> {
+        return this.#request('POST', 'threads', { body: thread });
     }
 
     thread(threadId: string): Promise<EnsembleThread> {

@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { basename } from 'node:path';
 import type {
     CreatedThread,
     CreateThreadInput,
@@ -13,16 +15,21 @@ import {
     EnsembleClient,
     EnsembleHttpError,
     type EnsembleImage,
+    type EnsembleProject,
     EnsembleUnauthorizedError,
     ensembleUrl,
     errorMessage,
 } from './api.ts';
 import { EnsembleCredentialStore } from './auth.ts';
+import { targetForFolder } from './folders.ts';
 import { ensembleRoot, ensembleThreadId } from './projects.ts';
 import { ThreadFeed, type ThreadFeedOptions } from './thread-feed.ts';
 
 export interface EnsembleProviderOptions {
-    /** The Ensemble thread this project is: `ensemble://thread/<id>`. */
+    /**
+     * The Ensemble thread this project is (`ensemble://thread/<id>`), or the folder
+     * a dev server runs in.
+     */
     projectRoot: string;
     baseUrl?: string;
     credentials?: EnsembleCredentialStore;
@@ -34,15 +41,19 @@ export interface EnsembleProviderOptions {
     log?: (message: string) => void;
 }
 
+/** Where pins go: a chat each in one thread, or a new thread each in a project. */
+type Target = { kind: 'thread'; threadId: string } | { kind: 'project'; project: EnsembleProject };
+
 /**
  * Sends pins to the Ensemble thread serving the page, one chat per pin, through
- * Ensemble's public local API. Pins in a thread share one feed.
+ * Ensemble's public local API. A page served from an Ensemble project's own folder
+ * starts a thread per pin instead. Pins in a thread share one feed.
  */
 export class EnsembleProvider implements Provider {
     readonly id = 'ensemble';
     readonly label = 'Ensemble';
     readonly #baseUrl: string;
-    readonly #threadId?: string;
+    #target?: Target;
     readonly #credentials: EnsembleCredentialStore;
     readonly #feeds = new Map<string, ThreadFeed>();
     readonly #listeners = new Set<(info: ProviderInfo) => void>();
@@ -56,7 +67,8 @@ export class EnsembleProvider implements Provider {
 
     constructor(readonly options: EnsembleProviderOptions) {
         this.#baseUrl = new URL(options.baseUrl ?? ensembleUrl()).origin;
-        this.#threadId = ensembleThreadId(options.projectRoot);
+        const threadId = ensembleThreadId(options.projectRoot);
+        if (threadId) this.#target = { kind: 'thread', threadId };
         this.#credentials = options.credentials ?? new EnsembleCredentialStore();
     }
 
@@ -85,22 +97,33 @@ export class EnsembleProvider implements Provider {
     }
 
     async listThreads(): Promise<{ project: ProviderProject; threads: ProviderThreadSummary[] }> {
-        const threadId = this.#requireThreadId();
-        const thread = await this.#call(client => client.thread(threadId));
+        const target = await this.#requireTarget();
+        const [name, threads] =
+            target.kind === 'thread'
+                ? await this.#call(async client => {
+                      const thread = await client.thread(target.threadId);
+                      return [thread.title, [thread]] as const;
+                  })
+                : [
+                      target.project.name,
+                      await this.#call(client => client.threads({ project: target.project.id })),
+                  ];
         // Ensemble gives no times, so every chat counts as current.
         const updatedAt = new Date().toISOString();
         return {
-            project: { name: thread.title },
-            threads: thread.chats.map(chat => {
-                const id = chatThreadId(threadId, chat.id);
-                return {
-                    id,
-                    title: chat.title,
-                    status: chat.status,
-                    updatedAt,
-                    url: this.threadUrl(id),
-                };
-            }),
+            project: { name },
+            threads: threads.flatMap(thread =>
+                thread.chats.map(chat => {
+                    const id = chatThreadId(thread.id, chat.id);
+                    return {
+                        id,
+                        title: chat.title,
+                        status: chat.status,
+                        updatedAt,
+                        url: this.threadUrl(id),
+                    };
+                }),
+            ),
         };
     }
 
@@ -109,16 +132,26 @@ export class EnsembleProvider implements Provider {
     }
 
     async createThread(input: CreateThreadInput): Promise<CreatedThread> {
-        const threadId = this.#requireThreadId();
-        const chat = await this.#call(client =>
-            client.createChat(threadId, {
-                title: input.title,
-                prompt: input.text,
-                attachments: input.attachments.map(toEnsembleImage),
-                ...(input.model ? { model: input.model } : {}),
-            }),
-        );
-        const providerThreadId = chatThreadId(threadId, chat.id);
+        const target = await this.#requireTarget();
+        const chat = {
+            title: input.title,
+            prompt: input.text,
+            attachments: input.attachments.map(toEnsembleImage),
+            ...(input.model ? { model: input.model } : {}),
+        };
+        const providerThreadId =
+            target.kind === 'thread'
+                ? chatThreadId(
+                      target.threadId,
+                      (await this.#call(client => client.createChat(target.threadId, chat))).id,
+                  )
+                : await this.#call(async client => {
+                      const thread = await client.createThread({
+                          projectId: target.project.id,
+                          ...chat,
+                      });
+                      return chatThreadId(thread.id, thread.chats[0]?.id ?? 'main');
+                  });
         return { providerThreadId, url: this.threadUrl(providerThreadId) };
     }
 
@@ -170,22 +203,31 @@ export class EnsembleProvider implements Provider {
         }
         const token = await this.#credentials.get(this.#baseUrl);
         if (!token) return this.#unauthorized();
-        if (!this.#threadId) {
-            return this.#setInfo({
-                state: 'unavailable',
-                detail: 'Choose an open Ensemble thread, or reload a page an Ensemble thread serves.',
-            });
-        }
         const client = new EnsembleClient({
             baseUrl: this.#baseUrl,
             token,
             timeoutMs: this.options.timeouts?.requestMs,
         });
         try {
-            const thread = await client.thread(this.#threadId);
+            let target = this.#target;
+            if (!target) {
+                const found = await targetForFolder(client, this.options.projectRoot);
+                if (found.kind === 'missing') {
+                    // Retrying picks the project up once the user adds it in Ensemble.
+                    return this.#retryLater(
+                        `${basename(found.repository)} isn't in Ensemble yet. Add ${tildify(found.repository)} as a project in Ensemble.`,
+                    );
+                }
+                target = found;
+            }
+            const label =
+                target.kind === 'thread'
+                    ? (await client.thread(target.threadId)).title
+                    : `${target.project.name} · new thread per pin`;
             if (this.#disposed) return;
+            this.#target = target;
             this.#client = client;
-            this.#setInfo({ state: 'ready', target: thread.title });
+            this.#setInfo({ state: 'ready', target: label });
             for (const feed of this.#feeds.values()) feed.follow(client);
         } catch (error) {
             if (error instanceof EnsembleUnauthorizedError) return this.#unauthorized();
@@ -226,9 +268,10 @@ export class EnsembleProvider implements Provider {
         }
     }
 
-    #requireThreadId(): string {
-        if (!this.#threadId) throw new Error('Choose an Ensemble thread first');
-        return this.#threadId;
+    async #requireTarget(): Promise<Target> {
+        if (!this.#target) await this.start();
+        if (!this.#target) throw new Error(this.#info.detail ?? 'Not connected to Ensemble');
+        return this.#target;
     }
 
     #unauthorized(): void {
@@ -267,6 +310,11 @@ function parseChatThreadId(providerThreadId: string): { threadId: string; chatId
         throw new Error(`Not an Ensemble chat: ${providerThreadId}`);
     }
     return { threadId, chatId };
+}
+
+function tildify(path: string): string {
+    const home = homedir();
+    return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
 
 function toEnsembleImage(image: ImageAttachment): EnsembleImage {
