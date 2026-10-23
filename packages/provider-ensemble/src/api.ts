@@ -200,11 +200,13 @@ export class EnsembleClient {
             );
             if (!response.body) throw new Error('Ensemble sent an empty feed');
             for await (const message of serverSentEvents(response.body, heard)) {
+                // Ensemble names the event in the data; an `event:` field only as a fallback.
                 const data = JSON.parse(message.data);
-                if (message.event === 'error') {
+                const type = data.type ?? message.event;
+                if (type === 'error') {
                     throw new Error(`Ensemble ended the feed: ${data.error}`);
                 }
-                yield { id: message.id, event: { ...data, type: message.event } };
+                yield { id: message.id, event: { ...data, type } };
             }
             throw new Error('Ensemble closed the feed');
         } finally {

@@ -178,7 +178,7 @@ export class FakeEnsembleServer {
     }
     #writeEvent(response: ServerResponse, event: { type: string; data: unknown; id?: string }) {
         response.write(
-            `${event.id ? `id: ${event.id}\n` : ''}event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`,
+            `${event.id ? `id: ${event.id}\n` : ''}data: ${JSON.stringify({ type: event.type, ...(event.data as object) })}\n\n`,
         );
     }
     #run(threadId: string, chat: Chat, text: string) {
