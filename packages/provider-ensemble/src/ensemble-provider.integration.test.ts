@@ -98,6 +98,7 @@ describe('Ensemble public API', () => {
         expect(first.providerThreadId).toMatch(new RegExp(`^${thread.id}/`));
         expect(second.providerThreadId).not.toBe(first.providerThreadId);
         expect(first.url).toBe(`ensemble://thread/${thread.id}`);
+        expect(first.archivable).toBe(false);
         expect(server.callsOf('POST', `threads/${thread.id}/chats`)[0]).toMatchObject({
             prompt: pin.text,
             title: pin.title,
@@ -319,6 +320,31 @@ describe('pages served from a folder', () => {
         const listed = await provider.listThreads();
         expect(listed.project.name).toBe('site');
         expect(listed.threads.map(t => t.id)).toEqual([created.providerThreadId]);
+    });
+
+    it('archives a thread it started, and reopens it', async () => {
+        const { provider, server, repo } = await setupFolder(repo => repo);
+        server.projects.push({ id: 'web', name: 'web', source: { kind: 'local', path: repo } });
+        await provider.pair();
+        const created = await provider.createThread(pin);
+        expect(created.archivable).toBe(true);
+        const threadId = String(created.providerThreadId.split('/')[0]);
+        const thread = server.threads.get(threadId);
+        await waitFor(() => thread?.chats[0]?.status === 'idle');
+        await provider.archive(created.providerThreadId);
+        expect(thread?.state).toBe('archived');
+        expect(server.callsOf('POST', `threads/${threadId}/archive`)).toHaveLength(1);
+        await provider.reopen(created.providerThreadId);
+        expect(thread?.state).toBe('idle');
+        const a = record();
+        provider.watch(created.providerThreadId, a.sink);
+        await provider.sendMessage({
+            providerThreadId: created.providerThreadId,
+            text: 'One more',
+            attachments: [],
+        });
+        await waitFor(() => [...a.messages.values()].some(m => m.text === 'Done: One more'));
+        expect(a.gone()).toBe(false);
     });
 
     it("sends pins to the thread whose workspace is on the folder's branch", async () => {

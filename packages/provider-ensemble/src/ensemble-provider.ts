@@ -152,7 +152,22 @@ export class EnsembleProvider implements Provider {
                       });
                       return chatThreadId(thread.id, thread.chats[0]?.id ?? 'main');
                   });
-        return { providerThreadId, url: this.threadUrl(providerThreadId) };
+        return {
+            providerThreadId,
+            url: this.threadUrl(providerThreadId),
+            // A thread Tencil started holds only this pin's work; the user's own threads hold more.
+            archivable: target.kind === 'project',
+        };
+    }
+
+    async archive(providerThreadId: string): Promise<void> {
+        const { threadId } = parseChatThreadId(providerThreadId);
+        await this.#call(client => client.archiveThread(threadId));
+    }
+
+    async reopen(providerThreadId: string): Promise<void> {
+        const { threadId } = parseChatThreadId(providerThreadId);
+        await this.#call(client => client.reopenThread(threadId));
     }
 
     async sendMessage(input: SendMessageInput): Promise<void> {

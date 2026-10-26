@@ -236,6 +236,8 @@ export class FakeEnsembleServer {
         if (method === 'GET' && path === 'threads') return json(200, this.#openThreads(url));
         if (method === 'GET' && path === 'feed') return this.#feed(request, url, response, json);
         if (method === 'POST' && path === 'threads') return this.#createThread(body, json);
+        const lifecycle = path.match(/^threads\/([^/]+)\/(archive|reopen)$/);
+        if (method === 'POST' && lifecycle) return this.#archive(lifecycle, json);
         const match = path.match(
             /^threads\/([^/]+)(?:\/chats(?:\/([^/]+)(?:\/(messages|stop))?)?)?$/,
         );
@@ -308,6 +310,26 @@ export class FakeEnsembleServer {
             });
             this.emit('thread', { threadId: thread.id, thread });
             this.#run(thread.id, chat, String(body.prompt));
+            json(200, thread);
+        }
+    }
+
+    /** Archiving one archived already, or reopening an open one, changes nothing. */
+    #archive(
+        [, id = '', action]: RegExpMatchArray,
+        json: (status: number, value?: unknown) => void,
+    ): void {
+        const thread = this.threads.get(decodeURIComponent(id));
+        if (!thread) {
+            json(404, { error: 'Not found' });
+        } else if (action === 'archive') {
+            if (thread.state !== 'archived') this.emit('archived', { threadId: thread.id });
+            json(204);
+        } else {
+            if (thread.state === 'archived') {
+                thread.state = 'idle';
+                this.emit('thread', { threadId: thread.id, thread });
+            }
             json(200, thread);
         }
     }

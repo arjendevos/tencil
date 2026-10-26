@@ -179,6 +179,16 @@ export class EnsembleClient {
         return this.#request('GET', threadPath(threadId));
     }
 
+    /** Saves the thread's work and conversation, and frees its machine. */
+    archiveThread(threadId: string): Promise<void> {
+        return this.#request('POST', `${threadPath(threadId)}/archive`, { body: {} });
+    }
+
+    /** Brings an archived thread back on a new machine with its saved work. */
+    reopenThread(threadId: string): Promise<EnsembleThread> {
+        return this.#request('POST', `${threadPath(threadId)}/reopen`, { body: {} });
+    }
+
     createChat(threadId: string, chat: NewChat): Promise<EnsembleChat> {
         return this.#request('POST', `${threadPath(threadId)}/chats`, { body: chat });
     }

@@ -67,7 +67,11 @@ export class Bridge {
             this.#broadcast({ type: 'settings', settings: this.#settings() }),
         );
         for (const thread of options.store.list()) {
-            if (thread.provider.threadId && options.providers.has(thread.provider.id)) {
+            if (
+                thread.provider.threadId &&
+                options.providers.has(thread.provider.id) &&
+                !this.#archived(thread.provider)
+            ) {
                 this.#watch(thread.provider.id, thread.provider.threadId);
             }
         }
@@ -169,10 +173,7 @@ export class Bridge {
                     return;
                 }
                 case 'thread.resolve':
-                    this.#update(message.threadId, thread => ({
-                        ...thread,
-                        resolved: message.resolved,
-                    }));
+                    await this.#resolve(message.threadId, message.resolved);
                     return;
                 case 'thread.move':
                     this.#update(message.threadId, thread => ({
@@ -249,7 +250,12 @@ export class Bridge {
             this.#update(thread.id, current => ({
                 ...current,
                 status: 'working',
-                provider: { id: provider.id, threadId: created.providerThreadId, url: created.url },
+                provider: {
+                    id: provider.id,
+                    threadId: created.providerThreadId,
+                    url: created.url,
+                    archivable: created.archivable,
+                },
             }));
             this.#watch(provider.id, created.providerThreadId);
             this.#options.log?.(`Pin "${thread.title}" → ${provider.label}`);
@@ -346,6 +352,7 @@ export class Bridge {
                         id: provider.id,
                         threadId: created.providerThreadId,
                         url: created.url,
+                        archivable: created.archivable,
                     },
                 }));
             }
@@ -388,6 +395,7 @@ export class Bridge {
                 id: provider.id,
                 threadId: providerThreadId,
                 url: provider.threadUrl(providerThreadId),
+                archivable: sibling?.provider.archivable,
             },
             createdAt: now,
             updatedAt: now,
@@ -439,6 +447,7 @@ export class Bridge {
                 id: provider.id,
                 threadId: message.providerThreadId,
                 url: provider.threadUrl(message.providerThreadId),
+                archivable: sibling?.provider.archivable,
             },
             createdAt: now,
             updatedAt: now,
@@ -451,9 +460,9 @@ export class Bridge {
     async #reply(message: Extract<ClientMessage, { type: 'thread.reply' }>): Promise<void> {
         const thread = this.#require(message.threadId);
         if (!thread.provider.threadId) throw new Error('This pin has no agent thread yet');
+        await this.#resolve(thread.id, false);
         this.#update(thread.id, current => ({
             ...current,
-            resolved: false,
             status: 'working',
             statusDetail: undefined,
             // Steps are per turn; the provider reports this one's afresh.
@@ -465,6 +474,45 @@ export class Bridge {
             text: message.text,
             attachments: message.attachments,
         });
+    }
+
+    /**
+     * A thread the provider started for its pins is archived once every pin on it is
+     * resolved, and reopened when one is reopened. It isn't watched while archived.
+     */
+    async #resolve(threadId: string, resolved: boolean): Promise<void> {
+        const thread = this.#require(threadId);
+        if (thread.resolved === resolved) return;
+        const { id: providerId, threadId: providerThreadId, archivable } = thread.provider;
+        const others = providerThreadId
+            ? this.#pinsFor(providerId, providerThreadId).filter(pin => pin.id !== threadId)
+            : [];
+        if (archivable && providerThreadId && others.every(pin => pin.resolved)) {
+            const provider = this.#providerOf(thread);
+            if (resolved) {
+                // Unwatched first, so the provider's own archived event doesn't mark the pins gone.
+                this.#unwatch(providerId, providerThreadId);
+                try {
+                    await provider.archive?.(providerThreadId);
+                } catch (error) {
+                    this.#watch(providerId, providerThreadId);
+                    throw error;
+                }
+            } else {
+                await provider.reopen?.(providerThreadId);
+                this.#watch(providerId, providerThreadId, true);
+            }
+        }
+        this.#update(threadId, current => ({ ...current, resolved }));
+    }
+
+    /** Whether the provider thread is archived: started for its pins, which are all resolved. */
+    #archived(provider: Thread['provider']): boolean {
+        return (
+            provider.archivable === true &&
+            provider.threadId !== undefined &&
+            this.#pinsFor(provider.id, provider.threadId).every(pin => pin.resolved)
+        );
     }
 
     /* ------------------------------ provider sink ------------------------------ */
@@ -500,7 +548,12 @@ export class Bridge {
     }
 
     #release(providerId: string, providerThreadId: string): void {
-        if (this.#pinsFor(providerId, providerThreadId).length > 0) return;
+        if (this.#pinsFor(providerId, providerThreadId).length === 0) {
+            this.#unwatch(providerId, providerThreadId);
+        }
+    }
+
+    #unwatch(providerId: string, providerThreadId: string): void {
         const key = watchKey(providerId, providerThreadId);
         this.#watches.get(key)?.();
         this.#watches.delete(key);
